@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HireMe | Dat lich</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body data-page="booking">
+  <header id="main-header"><div class="container header-content"><div class="logo" onclick="navigate('landing')"><img src="logo.png" alt="HireMe Logo"></div><ul class="nav-links"><li id="nav-landing" onclick="navigate('landing')">Trang chu</li><li id="nav-booking" onclick="navigate('booking')">Dat lich</li><li id="nav-experts" onclick="navigate('experts')">Chuyen gia</li><li id="nav-history" onclick="navigate('history')">Lich su</li></ul><div style="display:flex;gap:15px;align-items:center;"><div id="auth-buttons"><button class="btn btn-outline" style="padding:0.6rem 1.2rem;" onclick="openModal('auth-modal')">Dang nhap / Dang ky</button></div><div id="user-profile" onclick="logout()"><div class="avatar-sm"><i class="fa-solid fa-user"></i></div><span id="display-username">Hi, Guest</span></div></div></div></header>
+  <main class="page-padding container">
+    <div style="text-align:center;margin-bottom:3rem;"><h1 style="font-size:2.5rem;font-weight:800;margin-bottom:1rem;color:#0f172a;">Thiet lap cuoc hen Tu van</h1></div>
+    <div class="grid-2">
+      <div class="card">
+        <h2 style="margin-bottom:1.5rem;font-size:1.4rem;">1. Du lieu & Lich hen</h2>
+        <div class="upload-area" onclick="document.getElementById('file-upload').click()"><div class="upload-content"><i class="fa-solid fa-file-pdf" style="font-size:3.5rem;color:#94a3b8;margin-bottom:1rem;"></i><h3 id="upload-text" style="font-size:1.1rem;font-weight:700;color:#334155;">Keo tha hoac nhan de tai CV (PDF)</h3></div><input type="file" id="file-upload" style="display:none;" onchange="handleFile(event)"></div>
+        <div class="form-group"><label>Chuyen gia dong hanh</label><select id="expert-select" class="form-control" onchange="updatePrice()"><option value="150000" data-expert-id="">He thong phan cong ngau nhien - 150.000d</option></select></div>
+        <div class="form-row"><div class="form-group"><label>Ngay hen tu van</label><input type="date" id="booking-date" class="form-control" required></div><div class="form-group"><label>Khung gio</label><select id="booking-time" class="form-control" required><option value="">-- Chon gio --</option><option value="09:00">09:00 - 09:45</option><option value="14:00">14:00 - 14:45</option><option value="20:00">20:00 - 20:45</option></select></div></div>
+      </div>
+      <div class="card" style="height:fit-content;position:sticky;top:100px;"><h2 style="margin-bottom:1.5rem;font-size:1.4rem;">2. Tong quan don hang</h2><div style="background:#f8fafc;padding:1.5rem;border-radius:16px;margin-bottom:1.5rem;border:1px solid #f1f5f9;"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-muted);font-weight:500;">Phi dich vu co ban</span><strong id="total-price" style="font-size:1.5rem;color:var(--brand-blue);font-weight:800;">150.000d</strong></div></div><button class="btn btn-primary" style="width:100%;" onclick="triggerPayment()">Thanh toan & Dat lich</button></div>
+    </div>
+  </main>
+  <div class="modal-overlay" id="auth-modal"><div class="modal"><span class="close-btn" onclick="closeModal('auth-modal')"><i class="fa-solid fa-xmark"></i></span><div class="auth-tabs"><div class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Dang nhap</div><div class="auth-tab" id="tab-register" onclick="switchAuthMode('register')">Dang ky</div></div><form onsubmit="handleAuth(event)"><div class="form-group" id="group-name" style="display:none;"><label>Ho va ten</label><input type="text" id="auth-name" class="form-control"></div><div class="form-group"><label>Email</label><input type="email" id="auth-email" class="form-control" required></div><div class="form-group"><label>Mat khau</label><input type="password" id="auth-password" class="form-control" required></div><button type="submit" id="auth-submit-btn" class="btn btn-primary" style="width:100%;">Xac thuc</button></form></div></div>
+  <div class="modal-overlay" id="payment-modal"><div class="modal" style="text-align:center;"><span class="close-btn" onclick="closeModal('payment-modal')"><i class="fa-solid fa-xmark"></i></span><h2 style="font-weight:800;">Quet QR Thanh Toan</h2><div style="border:2px dashed #cbd5e1;padding:2rem;margin:1.5rem 0;border-radius:20px;"><i class="fa-solid fa-qrcode" style="font-size:5rem;color:#334155;margin-bottom:1rem;"></i><br><strong style="font-size:1.5rem;color:var(--brand-blue);" id="modal-price">150.000d</strong></div><button class="btn btn-primary" style="width:100%;" id="confirm-payment-btn" onclick="processPayment()">Toi da chuyen khoan thanh cong</button></div></div>
+  <script src="scripts/app.js"></script>
+</body>
+</html>

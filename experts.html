@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HireMe | Chuyen gia</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body data-page="experts">
+  <header id="main-header">
+    <div class="container header-content">
+      <div class="logo" onclick="navigate('landing')"><img src="logo.png" alt="HireMe Logo"></div>
+      <ul class="nav-links">
+        <li id="nav-landing" onclick="navigate('landing')">Trang chu</li>
+        <li id="nav-booking" onclick="navigate('booking')">Dat lich</li>
+        <li id="nav-experts" onclick="navigate('experts')">Chuyen gia</li>
+        <li id="nav-history" onclick="navigate('history')">Lich su</li>
+      </ul>
+      <div style="display:flex;gap:15px;align-items:center;">
+        <div id="auth-buttons"><button class="btn btn-outline" style="padding:0.6rem 1.2rem;" onclick="openModal('auth-modal')">Dang nhap / Dang ky</button></div>
+        <div id="user-profile" onclick="logout()"><div class="avatar-sm"><i class="fa-solid fa-user"></i></div><span id="display-username">Hi, Guest</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-padding container">
+    <div style="text-align:center;margin-bottom:2.5rem;">
+      <h1 style="font-size:2.4rem;font-weight:800;margin-bottom:0.75rem;color:#0f172a;">Danh sach Chuyen gia</h1>
+      <p style="color:var(--text-muted);max-width:700px;margin:0 auto;">Chon mentor phu hop voi muc tieu nghe nghiep cua ban. Du lieu duoc tai truc tiep tu database.</p>
+    </div>
+
+    <div id="experts-grid" class="grid-3"></div>
+  </main>
+
+  <div class="modal-overlay" id="auth-modal">
+    <div class="modal">
+      <span class="close-btn" onclick="closeModal('auth-modal')"><i class="fa-solid fa-xmark"></i></span>
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Dang nhap</div>
+        <div class="auth-tab" id="tab-register" onclick="switchAuthMode('register')">Dang ky</div>
+      </div>
+      <form onsubmit="handleAuth(event)">
+        <div class="form-group" id="group-name" style="display:none;"><label>Ho va ten</label><input type="text" id="auth-name" class="form-control"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="auth-email" class="form-control" required></div>
+        <div class="form-group"><label>Mat khau</label><input type="password" id="auth-password" class="form-control" required></div>
+        <button type="submit" id="auth-submit-btn" class="btn btn-primary" style="width:100%;">Xac thuc</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="scripts/app.js"></script>
+</body>
+</html>

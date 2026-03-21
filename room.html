@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HireMe | Room</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <main id="page-room" class="page active" style="display:flex;">
+    <div class="room-header">
+      <div>
+        <h1 style="font-size:1.25rem; font-weight:800; color:white;"><img src="logo.png" alt="HireMe" style="height:24px; filter:brightness(0) invert(1); vertical-align:middle;"> Room</h1>
+        <p style="font-size:0.85rem; color:#a1a1aa; margin-top:4px;" id="room-subtitle">Đang kết nối cùng chuyên gia...</p>
+      </div>
+      <div class="time-badge"><i class="fa-solid fa-record-vinyl"></i> <span id="timer">45:00</span></div>
+    </div>
+    <div class="workspace">
+      <div class="video-container">
+        <div class="main-video-wrapper">
+          <div class="expert-avatar" id="room-expert-avatar">C</div>
+          <h2 style="font-weight:600; color:white;">Màn hình chia sẻ từ Chuyên gia</h2>
+          <div style="position:absolute; bottom:1.5rem; left:1.5rem; background:rgba(0,0,0,0.7); padding:0.5rem 1rem; border-radius:12px; font-weight:600;"><i class="fa-solid fa-microphone" style="color:var(--brand-green);"></i> <span id="room-expert-name">Chuyên gia</span></div>
+        </div>
+        <div class="local-video-wrapper">
+          <video id="local-video" autoplay playsinline muted></video>
+          <div style="position:absolute; bottom:0.75rem; left:0.75rem; background:rgba(0,0,0,0.7); padding:0.2rem 0.6rem; border-radius:6px; font-size:0.75rem;">You</div>
+        </div>
+        <div class="controls-bar">
+          <button class="control-btn" id="btn-mic" onclick="toggleMic()"><i class="fa-solid fa-microphone"></i></button>
+          <button class="control-btn" id="btn-cam" onclick="toggleCam()"><i class="fa-solid fa-video"></i></button>
+          <button class="control-btn danger" onclick="endCall()"><i class="fa-solid fa-phone-slash"></i></button>
+        </div>
+      </div>
+      <div class="doc-container">
+        <div class="doc-header"><div style="color:#334155;"><i class="fa-solid fa-file-pdf" style="color:#ef4444;"></i> <span id="room-cv-name">CV_cua_ban.pdf</span></div></div>
+        <div class="doc-content">
+          <h2 style="text-align:center; margin-bottom:2rem;">BẢN NHÁP CV CỦA BẠN</h2>
+          <h4 style="color:var(--brand-blue); border-bottom:2px solid #e2e8f0; margin-bottom:1.2rem;">MỤC TIÊU NGHỀ NGHIỆP</h4>
+          <p style="margin-bottom:2rem;">Mong muốn làm <span class="highlight">nhân viên</span> để mang lại doanh thu.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const cvName = params.get('cv') || 'CV_cua_ban.pdf';
+    const expertName = params.get('expert') || 'Chuyên gia';
+
+    document.getElementById('room-cv-name').innerText = cvName;
+    document.getElementById('room-expert-name').innerText = expertName;
+    document.getElementById('room-subtitle').innerText = `Đang mã hóa kết nối tới: ${expertName}...`;
+    document.getElementById('room-expert-avatar').innerText = expertName.charAt(0).toUpperCase();
+
+    let localStream = null;
+    let timerInterval = null;
+    let isMicOn = true;
+    let isCamOn = true;
+
+    (async () => {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        document.getElementById('local-video').srcObject = localStream;
+      } catch (error) {
+        console.warn('Camera error:', error);
+      }
+
+      let timeLeft = 45 * 60;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (timeLeft <= 0) return clearInterval(timerInterval);
+        timeLeft--;
+        const m = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+        const s = String(timeLeft % 60).padStart(2, '0');
+        document.getElementById('timer').innerText = `${m}:${s}`;
+      }, 1000);
+    })();
+
+    function toggleMic() {
+      isMicOn = !isMicOn;
+      document.getElementById('btn-mic').innerHTML = `<i class="fa-solid fa-microphone${!isMicOn ? '-slash' : ''}"></i>`;
+    }
+
+    function toggleCam() {
+      isCamOn = !isCamOn;
+      if (localStream && localStream.getVideoTracks()[0]) {
+        localStream.getVideoTracks()[0].enabled = isCamOn;
+      }
+      document.getElementById('btn-cam').innerHTML = `<i class="fa-solid fa-video${!isCamOn ? '-slash' : ''}"></i>`;
+    }
+
+    function endCall() {
+      if (!confirm('Xác nhận rời khỏi phòng họp?')) return;
+      if (localStream) localStream.getTracks().forEach((track) => track.stop());
+      clearInterval(timerInterval);
+      window.location.href = 'history.html';
+    }
+  </script>
+</body>
+</html>
