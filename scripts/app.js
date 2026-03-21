@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+    ? 'http://localhost:3000/api'
+    : 'https://hireme-dtdx.onrender.com/api';
 const AUTH_TOKEN_KEY = 'hireme_token';
 const PENDING_EXPERT_KEY = 'hireme_selected_expert';
 
