@@ -22,9 +22,45 @@ const EXPERTS_CACHE_TTL_MS = 5 * 60 * 1000;
 const HISTORY_CACHE_TTL_MS = 2 * 60 * 1000;
 const BOOKING_STATUS_OPTIONS = ['pending_payment', 'confirmed', 'in_room', 'completed', 'cancelled', 'no_show'];
 const ADMIN_PAGE_IDS = ['admin', 'admin-users', 'admin-experts', 'admin-bookings', 'admin-checklogs'];
-const LOG_ACTIVITY_OPTIONS = ['Đăng nhập', 'Đăng xuất', 'Đặt lịch tư vấn thành công'];
+const ACTIVITY_EVENTS = {
+    login: 'Đăng nhập',
+    logout: 'Đăng xuất',
+    loginFailed: 'Đăng nhập thất bại',
+    registerSuccess: 'Đăng ký thành công',
+    registerFailed: 'Đăng ký thất bại',
+    pageHomeView: 'Truy cập trang chủ',
+    pageExpertsView: 'Truy cập trang experts',
+    pageBookingView: 'Truy cập trang booking',
+    pageHistoryView: 'Truy cập trang history',
+    pageRoomView: 'Truy cập trang room',
+    authModalOpened: 'Mở modal đăng nhập',
+    authModeSwitched: 'Chuyển tab login/register',
+    expertSelected: 'Chọn chuyên gia',
+    cvUploaded: 'Upload CV',
+    paymentModalOpened: 'Mở modal thanh toán',
+    bookingCreated: 'Booking thành công',
+    bookingFailed: 'Booking thất bại',
+    historyLoaded: 'Load lịch sử thành công',
+    historyLoadFailed: 'Load lịch sử thất bại',
+    roomJoinClicked: 'Bấm vào phòng chờ',
+    adminUserStatusUpdated: 'Admin cập nhật trạng thái user',
+    adminExpertCreated: 'Admin tạo expert',
+    adminExpertUpdated: 'Admin cập nhật expert',
+    adminExpertDeleted: 'Admin xóa expert',
+    adminBookingUpdated: 'Admin cập nhật lịch hẹn',
+    adminBookingDeleted: 'Admin xóa lịch hẹn',
+    adminLogsExported: 'Admin export checklog'
+};
+const PAGE_VIEW_ACTIVITY_BY_PAGE = {
+    landing: ACTIVITY_EVENTS.pageHomeView,
+    experts: ACTIVITY_EVENTS.pageExpertsView,
+    booking: ACTIVITY_EVENTS.pageBookingView,
+    history: ACTIVITY_EVENTS.pageHistoryView
+};
+const LOG_ACTIVITY_OPTIONS = Object.values(ACTIVITY_EVENTS);
 const LOG_DEVICE_OPTIONS = ['desktop', 'mobile', 'tablet'];
 const LOG_CUSTOMER_TYPE_OPTIONS = ['new', 'returning'];
+const PAGE_VIEW_DEBOUNCE_MS = 30000;
 
 let authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
 let isLoggedIn = false;
@@ -39,6 +75,7 @@ let adminExpertsCache = [];
 let adminRetryTimer = null;
 let forceRemoteApi = false;
 let preferredApiBase = USE_LOCAL_API ? LOCAL_API_BASE_URL : '';
+let lastPageViewTrackByActivity = {};
 let adminLogPaging = {
     page: 1,
     limit: 30,
@@ -251,6 +288,8 @@ async function initPageState() {
         loadExpertsFromApi(),
         hydrateAuthFromToken()
     ]);
+
+    trackPageViewByPage(document.body?.dataset?.page || 'landing');
     applyPendingExpertSelection();
 
     if (isAdminPage()) {
@@ -301,6 +340,9 @@ function syncAdminNavVisibility() {
 function openModal(id) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'flex';
+    if (id === 'auth-modal') {
+        trackActivity(ACTIVITY_EVENTS.authModalOpened, { pageId: document.body?.dataset?.page || 'landing' });
+    }
 }
 
 function closeModal(id) {
@@ -382,6 +424,31 @@ function detectChannelClient() {
         }
     }
     return 'direct';
+}
+
+function trackActivity(activity, metadata = null) {
+    if (!activity) return;
+    const payload = { activity };
+    if (metadata && typeof metadata === 'object') payload.metadata = metadata;
+
+    void apiFetch('/activity-logs', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    }).catch(() => {
+        // Activity logging must not break user workflows.
+    });
+}
+
+function trackPageViewByPage(pageId) {
+    const activity = PAGE_VIEW_ACTIVITY_BY_PAGE[pageId];
+    if (!activity) return;
+
+    const now = Date.now();
+    const lastTrackedAt = Number(lastPageViewTrackByActivity[activity] || 0);
+    if (now - lastTrackedAt < PAGE_VIEW_DEBOUNCE_MS) return;
+
+    lastPageViewTrackByActivity[activity] = now;
+    trackActivity(activity, { pageId });
 }
 
 function enforceAdminOnlyExperience() {
@@ -599,6 +666,11 @@ function renderExpertsGrid(experts) {
 }
 
 function selectExpert(price, name, expertId = '') {
+    trackActivity(ACTIVITY_EVENTS.expertSelected, {
+        expertId: expertId || null,
+        expertName: name,
+        priceVnd: Number(price || 0)
+    });
     sessionStorage.setItem(PENDING_EXPERT_KEY, JSON.stringify({ price: String(price), name, expertId }));
     navigate('booking');
 }
@@ -663,6 +735,12 @@ function handleFile(event) {
     uploadedFile = event.target.files[0];
     uploadedFileName = uploadedFile.name;
 
+    trackActivity(ACTIVITY_EVENTS.cvUploaded, {
+        filename: uploadedFile.name,
+        fileSizeBytes: uploadedFile.size,
+        mimeType: uploadedFile.type || ''
+    });
+
     const txt = document.getElementById('upload-text');
     if (txt) {
         txt.innerText = `Đã chọn file: ${uploadedFileName}`;
@@ -698,6 +776,8 @@ function switchAuthMode(mode) {
         authNameInput.setAttribute('required', 'true');
         submitBtn.innerText = 'Đăng ký tài khoản mới';
     }
+
+    trackActivity(ACTIVITY_EVENTS.authModeSwitched, { mode });
 }
 
 async function handleAuth(e) {
@@ -773,6 +853,11 @@ function triggerPayment() {
     const modalPrice = document.getElementById('modal-price');
     const totalPrice = document.getElementById('total-price');
     if (modalPrice && totalPrice) modalPrice.innerText = totalPrice.innerText;
+    trackActivity(ACTIVITY_EVENTS.paymentModalOpened, {
+        bookingDate: selectedDate,
+        startTime: selectedTime,
+        totalPriceVnd: parseVnd(totalPrice?.innerText)
+    });
     openModal('payment-modal');
 }
 
@@ -795,9 +880,20 @@ async function processPayment() {
 
         await apiFetch('/bookings', { method: 'POST', body: formData });
         localStorage.setItem('hireme_has_booking', '1');
+        trackActivity(ACTIVITY_EVENTS.bookingCreated, {
+            bookingDate: selectedDate,
+            startTime: selectedTime,
+            totalPriceVnd: totalPrice,
+            expertId: selected.id || null
+        });
         closeModal('payment-modal');
         navigate('history');
     } catch (error) {
+        trackActivity(ACTIVITY_EVENTS.bookingFailed, {
+            bookingDate: selectedDate,
+            startTime: selectedTime,
+            reason: error.message || 'booking_failed'
+        });
         alert(error.message || 'Có lỗi khi xử lý thanh toán.');
     } finally {
         btn.innerHTML = 'Tôi đã chuyển khoản thành công';
@@ -830,6 +926,7 @@ async function loadHistoryFromApi() {
     try {
         const response = await apiFetch('/bookings/me', { method: 'GET' });
         const bookings = response.bookings || [];
+        trackActivity(ACTIVITY_EVENTS.historyLoaded, { totalBookings: bookings.length });
         writeCache(historyCacheKey, bookings);
 
         container.querySelectorAll('.history-item').forEach((el) => el.remove());
@@ -850,6 +947,7 @@ async function loadHistoryFromApi() {
             );
         });
     } catch (error) {
+        trackActivity(ACTIVITY_EVENTS.historyLoadFailed, { reason: error.message || 'history_load_failed' });
         console.warn('History load error:', error.message);
     }
 }
@@ -882,8 +980,11 @@ function createHistoryRecord(cvName, expertName, dateStr, timeStr, prepend = tru
 }
 
 function joinRoom(cvName, expertName) {
+    trackActivity(ACTIVITY_EVENTS.roomJoinClicked, { cvName, expertName });
     const params = new URLSearchParams({ cv: cvName, expert: expertName });
-    window.location.href = `room.html?${params.toString()}`;
+    setTimeout(() => {
+        window.location.href = `room.html?${params.toString()}`;
+    }, 120);
 }
 
 function escapeHtml(value) {

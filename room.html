@@ -46,6 +46,50 @@
   </main>
 
   <script>
+    const ROOM_ACTIVITY_API_BASES = [
+      'http://localhost:3000/api',
+      'http://localhost:3001/api',
+      'http://localhost:3002/api',
+      'https://hireme-dtdx.onrender.com/api'
+    ];
+
+    function getRoomSessionId() {
+      const key = 'hireme_session_id';
+      const existing = localStorage.getItem(key);
+      if (existing && /^case[A-Za-z0-9]{4}$/.test(existing)) return existing;
+      const seed = Math.random().toString(36).slice(2).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const sessionId = `case${seed.slice(0, 4).padEnd(4, '0')}`;
+      localStorage.setItem(key, sessionId);
+      return sessionId;
+    }
+
+    async function trackRoomActivity(activity, metadata = null) {
+      const token = localStorage.getItem('hireme_token') || '';
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Session-Id': getRoomSessionId(),
+        'X-Device': /iPad|Tablet/i.test(navigator.userAgent || '') ? 'tablet' : (/Mobi|Android|iPhone/i.test(navigator.userAgent || '') ? 'mobile' : 'desktop'),
+        'X-Channel': 'direct'
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const payload = { activity };
+      if (metadata && typeof metadata === 'object') payload.metadata = metadata;
+
+      for (const base of ROOM_ACTIVITY_API_BASES) {
+        try {
+          const response = await fetch(`${base}/activity-logs`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+          });
+          if (response.ok) return;
+        } catch (_error) {
+          // try next base url
+        }
+      }
+    }
+
     const params = new URLSearchParams(window.location.search);
     const cvName = params.get('cv') || 'CV_cua_ban.pdf';
     const expertName = params.get('expert') || 'Chuyên gia';
@@ -54,6 +98,8 @@
     document.getElementById('room-expert-name').innerText = expertName;
     document.getElementById('room-subtitle').innerText = `Đang mã hóa kết nối tới: ${expertName}...`;
     document.getElementById('room-expert-avatar').innerText = expertName.charAt(0).toUpperCase();
+
+    trackRoomActivity('Truy cập trang room', { cvName, expertName });
 
     let localStream = null;
     let timerInterval = null;

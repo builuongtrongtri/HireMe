@@ -102,7 +102,45 @@ const bookingSchema = new mongoose.Schema(
 const ACTIVITY_LABELS = {
   login: 'Đăng nhập',
   logout: 'Đăng xuất',
-  booking_created: 'Đặt lịch tư vấn thành công'
+  login_failed: 'Đăng nhập thất bại',
+  register_success: 'Đăng ký thành công',
+  register_failed: 'Đăng ký thất bại',
+  page_home_view: 'Truy cập trang chủ',
+  page_experts_view: 'Truy cập trang experts',
+  page_booking_view: 'Truy cập trang booking',
+  page_history_view: 'Truy cập trang history',
+  page_room_view: 'Truy cập trang room',
+  auth_modal_opened: 'Mở modal đăng nhập',
+  auth_mode_switched: 'Chuyển tab login/register',
+  expert_selected: 'Chọn chuyên gia',
+  cv_uploaded: 'Upload CV',
+  payment_modal_opened: 'Mở modal thanh toán',
+  booking_created: 'Booking thành công',
+  booking_failed: 'Booking thất bại',
+  history_loaded: 'Load lịch sử thành công',
+  history_load_failed: 'Load lịch sử thất bại',
+  room_join_clicked: 'Bấm vào phòng chờ',
+  admin_user_status_updated: 'Admin cập nhật trạng thái user',
+  admin_expert_created: 'Admin tạo expert',
+  admin_expert_updated: 'Admin cập nhật expert',
+  admin_expert_deleted: 'Admin xóa expert',
+  admin_booking_updated: 'Admin cập nhật lịch hẹn',
+  admin_booking_deleted: 'Admin xóa lịch hẹn',
+  admin_logs_exported: 'Admin export checklog'
+};
+
+const ACTIVITY_LABEL_ALIASES = {
+  'Truy cập trang chuyên gia': ACTIVITY_LABELS.page_experts_view,
+  'Truy cập trang đặt lịch': ACTIVITY_LABELS.page_booking_view,
+  'Truy cập trang lịch sử': ACTIVITY_LABELS.page_history_view,
+  'Truy cập phòng chờ': ACTIVITY_LABELS.page_room_view,
+  'Chuyển tab đăng nhập/đăng ký': ACTIVITY_LABELS.auth_mode_switched,
+  'Tải CV lên': ACTIVITY_LABELS.cv_uploaded,
+  'Đặt lịch tư vấn thành công': ACTIVITY_LABELS.booking_created,
+  'Đặt lịch tư vấn thất bại': ACTIVITY_LABELS.booking_failed,
+  'Tải lịch sử lịch hẹn': ACTIVITY_LABELS.history_loaded,
+  'Tải lịch sử lịch hẹn thất bại': ACTIVITY_LABELS.history_load_failed,
+  'Vào phòng chờ': ACTIVITY_LABELS.room_join_clicked
 };
 
 const activityLogSchema = new mongoose.Schema(
@@ -200,6 +238,7 @@ async function authMiddleware(req, res, next) {
       return res.status(401).json({ message: 'Unauthorized' });
     }
     if (!user.isActive) {
+      await writeActivityLog(req, ACTIVITY_LABELS.login_failed, user._id);
       return res.status(403).json({ message: 'Tài khoản của bạn đang bị khóa.' });
     }
 
@@ -255,6 +294,15 @@ async function resolveCustomerType(req, userId) {
   if (!userId) return 'new';
   const bookingCount = await Booking.countDocuments({ candidateId: userId });
   return bookingCount > 0 ? 'returning' : 'new';
+}
+
+function resolveActivityLabel(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+  if (Object.values(ACTIVITY_LABELS).includes(value)) return value;
+  if (ACTIVITY_LABEL_ALIASES[value]) return ACTIVITY_LABEL_ALIASES[value];
+  if (ACTIVITY_LABELS[value]) return ACTIVITY_LABELS[value];
+  return '';
 }
 
 async function writeActivityLog(req, activityLabel, userId = null) {
@@ -356,6 +404,32 @@ app.use('/api', (req, res, next) => {
   return next();
 });
 
+app.post('/api/activity-logs', async (req, res) => {
+  try {
+    const activityLabel = resolveActivityLabel(req.body?.activity || req.body?.activityKey);
+    if (!activityLabel) {
+      return res.status(400).json({ message: 'Activity không hợp lệ.' });
+    }
+
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (token) {
+      try {
+        const payload = jwt.verify(token, jwtSecret);
+        const user = await User.findById(payload.sub);
+        if (user && user.isActive) req.user = user;
+      } catch (_error) {
+        // Allow anonymous logging for unauthenticated UI events.
+      }
+    }
+
+    await writeActivityLog(req, activityLabel, req.user?._id || null);
+    return res.status(201).json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Cannot create activity log.' });
+  }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -366,6 +440,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) {
+      await writeActivityLog(req, ACTIVITY_LABELS.register_failed, null);
       return res.status(400).json({ message: 'Email đã tồn tại.' });
     }
 
@@ -378,6 +453,7 @@ app.post('/api/auth/register', async (req, res) => {
     });
 
     const token = createToken(user);
+    await writeActivityLog(req, ACTIVITY_LABELS.register_success, user._id);
     return res.status(201).json({
       token,
       user: {
@@ -388,6 +464,7 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
+    await writeActivityLog(req, ACTIVITY_LABELS.register_failed, null);
     return res.status(500).json({ message: error.message || 'Register failed.' });
   }
 });
@@ -401,6 +478,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
+      await writeActivityLog(req, ACTIVITY_LABELS.login_failed, null);
       return res.status(400).json({ message: 'Sai email hoặc mật khẩu.' });
     }
     if (!user.isActive) {
@@ -409,6 +487,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) {
+      await writeActivityLog(req, ACTIVITY_LABELS.login_failed, user._id);
       return res.status(400).json({ message: 'Sai email hoặc mật khẩu.' });
     }
 
@@ -600,6 +679,8 @@ app.patch('/api/admin/users/:userId/is-active', authMiddleware, adminOnly, async
       return res.status(404).json({ message: 'Không tìm thấy user.' });
     }
 
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_user_status_updated, req.user._id);
+
     return res.json({
       user: {
         id: updated._id,
@@ -692,6 +773,8 @@ app.post('/api/admin/experts', authMiddleware, adminOnly, async (req, res) => {
       isAvailable: isAvailable !== false
     });
 
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_expert_created, req.user._id);
+
     return res.status(201).json({
       expert: {
         id: expert._id,
@@ -750,6 +833,8 @@ app.put('/api/admin/experts/:expertId', authMiddleware, adminOnly, async (req, r
       await user.save();
     }
 
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_expert_updated, req.user._id);
+
     return res.json({ message: 'Cập nhật expert thành công.' });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Cannot update expert.' });
@@ -771,6 +856,8 @@ app.delete('/api/admin/experts/:expertId', authMiddleware, adminOnly, async (req
     await Booking.updateMany({ expertId: expert._id }, { $set: { expertId: null } });
     await ExpertProfile.deleteOne({ _id: expert._id });
     await User.updateOne({ _id: expert.userId }, { $set: { role: 'candidate' } });
+
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_expert_deleted, req.user._id);
 
     return res.json({ message: 'Đã xóa expert.' });
   } catch (error) {
@@ -861,6 +948,7 @@ app.patch('/api/admin/bookings/:bookingId', authMiddleware, adminOnly, async (re
     }
 
     await booking.save();
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_booking_updated, req.user._id);
     return res.json({ message: 'Cập nhật lịch hẹn thành công.' });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Cannot update booking.' });
@@ -880,6 +968,7 @@ app.delete('/api/admin/bookings/:bookingId', authMiddleware, adminOnly, async (r
     }
 
     await Booking.deleteOne({ _id: booking._id });
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_booking_deleted, req.user._id);
     return res.json({ message: 'Đã xóa lịch hẹn.' });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Cannot delete booking.' });
@@ -1002,6 +1091,7 @@ app.get('/api/admin/activity-logs/export', authMiddleware, adminOnly, async (req
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await writeActivityLog(req, ACTIVITY_LABELS.admin_logs_exported, req.user._id);
     return res.send(buffer);
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Cannot export activity logs.' });
