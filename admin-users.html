@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HireMe | Admin Console</title>
+  <title>HireMe | Admin Users</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <link rel="stylesheet" href="styles/main.css">
 </head>
-<body data-page="admin">
+<body data-page="admin-users">
   <header id="main-header">
     <div class="container header-content">
       <div class="logo"><img src="logo.png" alt="HireMe Logo"></div>
@@ -25,37 +25,39 @@
   <main class="page-padding container admin-console" id="admin-page">
     <section class="admin-hero">
       <div>
-        <h1>Quan tri he thong</h1>
-        <p>Chon nhom chuc nang can quan ly.</p>
+        <h1>Quan ly user</h1>
+        <p>Quan ly trang thai active/locked cho tai khoan he thong.</p>
       </div>
       <div class="admin-chip"><i class="fa-solid fa-shield-halved"></i> Admin only</div>
     </section>
 
     <section class="admin-panel card">
-      <div class="admin-panel-head" style="margin-bottom:0.4rem;">
-        <h2>Dieu huong quan tri</h2>
+      <div class="admin-grid-form" style="grid-template-columns:repeat(4, minmax(140px, 1fr));margin-bottom:0;">
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-users" onclick="navigate('admin-users')">Users</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-experts" onclick="navigate('admin-experts')">Experts</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-bookings" onclick="navigate('admin-bookings')">Bookings</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-checklogs" onclick="navigate('admin-checklogs')">Checklog</button>
       </div>
-      <div class="grid-3">
-        <div class="card" style="padding:1.4rem;">
-          <h3 style="font-size:1.05rem;font-weight:800;color:#0f172a;">Quan ly user</h3>
-          <p style="color:#64748b;margin:0.4rem 0 1rem 0;">Khoa/mo tai khoan va theo doi danh sach user.</p>
-          <button class="btn btn-outline" style="width:100%;" data-admin-nav="admin-users" onclick="navigate('admin-users')">Mo trang user</button>
-        </div>
-        <div class="card" style="padding:1.4rem;">
-          <h3 style="font-size:1.05rem;font-weight:800;color:#0f172a;">Quan ly experts</h3>
-          <p style="color:#64748b;margin:0.4rem 0 1rem 0;">Tao, cap nhat, xoa ho so chuyen gia.</p>
-          <button class="btn btn-outline" style="width:100%;" data-admin-nav="admin-experts" onclick="navigate('admin-experts')">Mo trang experts</button>
-        </div>
-        <div class="card" style="padding:1.4rem;">
-          <h3 style="font-size:1.05rem;font-weight:800;color:#0f172a;">Quan ly lich hen</h3>
-          <p style="color:#64748b;margin:0.4rem 0 1rem 0;">Phan cong expert va cap nhat trang thai lich hen.</p>
-          <button class="btn btn-outline" style="width:100%;" data-admin-nav="admin-bookings" onclick="navigate('admin-bookings')">Mo trang bookings</button>
-        </div>
-        <div class="card" style="padding:1.4rem;">
-          <h3 style="font-size:1.05rem;font-weight:800;color:#0f172a;">Quan ly checklog</h3>
-          <p style="color:#64748b;margin:0.4rem 0 1rem 0;">Loc va export nhat ky hoat dong ra file Excel.</p>
-          <button class="btn btn-outline" style="width:100%;" data-admin-nav="admin-checklogs" onclick="navigate('admin-checklogs')">Mo trang checklog</button>
-        </div>
+    </section>
+
+    <section class="admin-panel card">
+      <div class="admin-panel-head">
+        <h2>Danh sach user</h2>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Ho ten</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Trang thai</th>
+            </tr>
+          </thead>
+          <tbody id="admin-users-tbody">
+            <tr><td colspan="4" class="admin-empty">Dang tai du lieu...</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HireMe | Admin Checklog</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body data-page="admin-checklogs">
+  <header id="main-header">
+    <div class="container header-content">
+      <div class="logo"><img src="logo.png" alt="HireMe Logo"></div>
+      <ul class="nav-links">
+        <li id="nav-admin" class="active" onclick="navigate('admin')">Admin Console</li>
+      </ul>
+      <div style="display:flex;gap:15px;align-items:center;">
+        <div id="auth-buttons"><button class="btn btn-outline" style="padding:0.6rem 1.2rem;" onclick="openModal('auth-modal')">Dang nhap / Dang ky</button></div>
+        <div id="user-profile" onclick="logout()"><div class="avatar-sm"><i class="fa-solid fa-user"></i></div><span id="display-username">Hi, Guest</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-padding container admin-console" id="admin-page">
+    <section class="admin-hero">
+      <div>
+        <h1>Quan ly checklog</h1>
+        <p>Theo doi log hoat dong va export du lieu ra file Excel.</p>
+      </div>
+      <div class="admin-chip"><i class="fa-solid fa-shield-halved"></i> Admin only</div>
+    </section>
+
+    <section class="admin-panel card">
+      <div class="admin-grid-form" style="grid-template-columns:repeat(4, minmax(140px, 1fr));margin-bottom:0;">
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-users" onclick="navigate('admin-users')">Users</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-experts" onclick="navigate('admin-experts')">Experts</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-bookings" onclick="navigate('admin-bookings')">Bookings</button>
+        <button type="button" class="btn btn-outline" data-admin-nav="admin-checklogs" onclick="navigate('admin-checklogs')">Checklog</button>
+      </div>
+    </section>
+
+    <section class="admin-panel card">
+      <div class="admin-panel-head">
+        <h2>Bo loc checklog</h2>
+      </div>
+      <div class="admin-grid-form compact" style="grid-template-columns:repeat(5, minmax(150px, 1fr));">
+        <select id="admin-log-activity" class="form-control">
+          <option value="">Tat ca hoat dong</option>
+          <option value="Đăng nhập">Đăng nhập</option>
+          <option value="Đăng xuất">Đăng xuất</option>
+          <option value="Đặt lịch tư vấn thành công">Đặt lịch tư vấn thành công</option>
+        </select>
+        <input id="admin-log-channel" class="form-control" type="text" placeholder="Channel">
+        <select id="admin-log-device" class="form-control">
+          <option value="">Tat ca device</option>
+          <option value="desktop">desktop</option>
+          <option value="mobile">mobile</option>
+          <option value="tablet">tablet</option>
+        </select>
+        <select id="admin-log-customer-type" class="form-control">
+          <option value="">Tat ca customer type</option>
+          <option value="new">new</option>
+          <option value="returning">returning</option>
+        </select>
+        <input id="admin-log-session-id" class="form-control" type="text" placeholder="Session ID (vd: caseAB12)">
+        <input id="admin-log-from" class="form-control" type="date" placeholder="Tu ngay">
+        <input id="admin-log-to" class="form-control" type="date" placeholder="Den ngay">
+        <input id="admin-log-limit" class="form-control" type="number" min="1" max="500" value="30" placeholder="So dong/trang">
+        <input id="admin-log-page" class="form-control" type="number" min="1" value="1" placeholder="Trang">
+        <div class="admin-form-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary" onclick="applyAdminLogFilters()">Loc du lieu</button>
+          <button type="button" class="btn btn-outline" onclick="clearAdminLogFilters()">Xoa loc</button>
+        </div>
+      </div>
+      <div class="admin-panel-head" style="margin:0.5rem 0 0.8rem 0;">
+        <p id="admin-log-paging-info">Trang 1/1 - Tong 0 ban ghi</p>
+        <div class="admin-form-actions">
+          <button type="button" class="btn btn-outline" onclick="adminLogPrevPage()">Trang truoc</button>
+          <button type="button" class="btn btn-outline" onclick="adminLogNextPage()">Trang sau</button>
+          <button type="button" class="btn btn-primary" onclick="exportAdminActivityLogsExcel()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
+        </div>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Session ID</th>
+              <th>Activity</th>
+              <th>Timestamp (ISO)</th>
+              <th>Channel</th>
+              <th>Device</th>
+              <th>Customer Type</th>
+              <th>User</th>
+              <th>Email</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody id="admin-logs-tbody">
+            <tr><td colspan="9" class="admin-empty">Dang tai du lieu...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-overlay" id="auth-modal"><div class="modal"><span class="close-btn" onclick="closeModal('auth-modal')"><i class="fa-solid fa-xmark"></i></span><div class="auth-tabs"><div class="auth-tab active" id="tab-login" onclick="switchAuthMode('login')">Dang nhap</div><div class="auth-tab" id="tab-register" onclick="switchAuthMode('register')">Dang ky</div></div><form onsubmit="handleAuth(event)"><div class="form-group" id="group-name" style="display:none;"><label>Ho va ten</label><input type="text" id="auth-name" class="form-control"></div><div class="form-group"><label>Email</label><input type="email" id="auth-email" class="form-control" required></div><div class="form-group"><label>Mat khau</label><input type="password" id="auth-password" class="form-control" required></div><button type="submit" id="auth-submit-btn" class="btn btn-primary" style="width:100%;">Xac thuc</button></form></div></div>
+
+  <script src="scripts/app.js"></script>
+</body>
+</html>

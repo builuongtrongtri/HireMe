@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const XLSX = require('xlsx');
 
 dotenv.config();
 
@@ -98,20 +99,26 @@ const bookingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const ACTIVITY_LABELS = {
+  login: 'Đăng nhập',
+  logout: 'Đăng xuất',
+  booking_created: 'Đặt lịch tư vấn thành công'
+};
+
 const activityLogSchema = new mongoose.Schema(
   {
     sessionId: { type: String, required: true, index: true },
-    activity: { type: String, required: true, trim: true, index: true },
+    activity: {
+      type: String,
+      required: true,
+      enum: Object.values(ACTIVITY_LABELS),
+      index: true
+    },
     timestamp: { type: Date, default: Date.now, index: true },
     channel: { type: String, default: 'direct', index: true },
-    device: { type: String, default: 'unknown' },
+    device: { type: String, default: 'desktop' },
     customerType: { type: String, enum: ['new', 'returning'], default: 'new', index: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    method: { type: String, default: '' },
-    path: { type: String, default: '' },
-    statusCode: { type: Number, default: 0 },
-    latencyMs: { type: Number, default: 0 },
-    metadata: { type: mongoose.Schema.Types.Mixed, default: null }
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { timestamps: false }
 );
@@ -155,6 +162,29 @@ function plus45Min(startTime) {
   return `${endH}:${endM}`;
 }
 
+function parsePositiveInt(value, fallback, max) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return fallback;
+  if (typeof max === 'number') return Math.min(parsed, max);
+  return parsed;
+}
+
+function parseDateBoundary(value, isEnd = false) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const normalized = raw.includes('T') ? raw : `${raw}${isEnd ? 'T23:59:59.999Z' : 'T00:00:00.000Z'}`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function toIsoDateTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toISOString();
+}
+
 async function authMiddleware(req, res, next) {
   try {
     const authHeader = req.headers.authorization || '';
@@ -180,23 +210,6 @@ async function authMiddleware(req, res, next) {
   }
 }
 
-async function optionalAuthMiddleware(req, _res, next) {
-  try {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    if (!token) return next();
-
-    const payload = jwt.verify(token, jwtSecret);
-    const user = await User.findById(payload.sub);
-    if (user && user.isActive) {
-      req.user = user;
-    }
-  } catch (_error) {
-    // optional auth should never block request
-  }
-  return next();
-}
-
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Bạn không có quyền truy cập chức năng này.' });
@@ -204,67 +217,77 @@ function adminOnly(req, res, next) {
   return next();
 }
 
-function inferDevice(userAgent = '') {
+function normalizeCaseSessionId(raw) {
+  const value = String(raw || '').trim();
+  if (/^case[A-Za-z0-9]{4}$/.test(value)) return value;
+  const seed = Math.random().toString(36).slice(2).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return `case${seed.slice(0, 4).padEnd(4, '0')}`;
+}
+
+function detectDevice(userAgent = '') {
   const ua = String(userAgent).toLowerCase();
-  if (!ua) return 'unknown';
-  if (ua.includes('mobile')) return 'mobile';
-  if (ua.includes('tablet') || ua.includes('ipad')) return 'tablet';
+  if (!ua) return 'desktop';
+  if (ua.includes('ipad') || ua.includes('tablet')) return 'tablet';
+  if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) return 'mobile';
   return 'desktop';
 }
 
-async function resolveCustomerType(req) {
-  if (req.user?.role === 'candidate') {
-    const hadBooking = await Booking.exists({ candidateId: req.user._id });
-    return hadBooking ? 'returning' : 'new';
+function resolveChannel(req) {
+  const fromHeader = String(req.headers['x-channel'] || '').trim();
+  if (fromHeader) return fromHeader.slice(0, 120);
+
+  const referer = String(req.headers.referer || '').trim();
+  if (referer) {
+    try {
+      return new URL(referer).hostname.slice(0, 120) || 'referral';
+    } catch (_error) {
+      return 'referral';
+    }
   }
 
-  const provided = String(req.headers['x-customer-type'] || '').toLowerCase();
-  if (provided === 'returning') return 'returning';
-  return 'new';
+  return 'direct';
 }
 
-async function writeActivityLog(req, payload = {}) {
+async function resolveCustomerType(req, userId) {
+  const fromHeader = String(req.headers['x-customer-type'] || '').toLowerCase();
+  if (fromHeader === 'new' || fromHeader === 'returning') return fromHeader;
+
+  if (!userId) return 'new';
+  const bookingCount = await Booking.countDocuments({ candidateId: userId });
+  return bookingCount > 0 ? 'returning' : 'new';
+}
+
+async function writeActivityLog(req, activityLabel, userId = null) {
   try {
-    const sessionId = String(req.headers['x-session-id'] || payload.sessionId || '').trim() || `anon-${Date.now()}`;
-    const channel = String(req.headers['x-channel'] || payload.channel || req.get('origin') || 'direct').slice(0, 120);
-    const device = String(req.headers['x-device'] || payload.device || inferDevice(req.get('user-agent'))).slice(0, 80);
-    const customerType = payload.customerType || await resolveCustomerType(req);
+    if (!Object.values(ACTIVITY_LABELS).includes(activityLabel)) return;
 
-    await ActivityLog.create({
-      sessionId,
-      activity: payload.activity || `${req.method} ${req.path}`,
-      timestamp: payload.timestamp || new Date(),
-      channel,
-      device,
-      customerType,
-      userId: req.user?._id || null,
-      method: req.method,
-      path: req.path,
-      statusCode: payload.statusCode || 0,
-      latencyMs: payload.latencyMs || 0,
-      metadata: payload.metadata || null
-    });
-  } catch (_error) {
-    // logging must never break business APIs
-  }
-}
+    const excludedAdminEmail = String(process.env.ADMIN_EMAIL || 'admin@hireme.vn').toLowerCase();
+    const requestUserEmail = String(req.user?.email || '').toLowerCase();
+    if (requestUserEmail && requestUserEmail === excludedAdminEmail) return;
 
-app.use('/api', optionalAuthMiddleware, (req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    if (req.path === '/health' || req.path === '/activity-logs' || req.path.startsWith('/admin/activity-logs')) {
-      return;
+    if (userId) {
+      const isSameUserAsRequest = req.user && String(req.user._id) === String(userId);
+      if (!isSameUserAsRequest) {
+        const user = await User.findById(userId).select('email').lean();
+        const targetEmail = String(user?.email || '').toLowerCase();
+        if (targetEmail && targetEmail === excludedAdminEmail) return;
+      }
     }
 
-    void writeActivityLog(req, {
-      activity: `${req.method} ${req.path}`,
-      statusCode: res.statusCode,
-      latencyMs: Date.now() - start
+    const customerType = await resolveCustomerType(req, userId);
+    await ActivityLog.create({
+      sessionId: normalizeCaseSessionId(req.headers['x-session-id']),
+      activity: activityLabel,
+      timestamp: new Date(),
+      channel: resolveChannel(req),
+      device: String(req.headers['x-device'] || detectDevice(req.get('user-agent'))).slice(0, 50) || 'desktop',
+      customerType,
+      userId
     });
-  });
-
-  next();
-});
+  } catch (_error) {
+    // Logging should never break auth/booking business APIs.
+  }
+}
 
 async function seedExpertsIfEmpty() {
   const adminEmail = (process.env.ADMIN_EMAIL || 'admin@hireme.vn').toLowerCase();
@@ -318,7 +341,11 @@ async function seedExpertsIfEmpty() {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mongoReady: isMongoReady, port: activePort });
+  res.json({
+    ok: true,
+    mongoReady: isMongoReady,
+    port: activePort
+  });
 });
 
 app.use('/api', (req, res, next) => {
@@ -327,31 +354,6 @@ app.use('/api', (req, res, next) => {
     return res.status(503).json({ message: 'Database đang kết nối lại. Vui lòng thử lại sau vài giây.' });
   }
   return next();
-});
-
-app.post('/api/activity-logs', optionalAuthMiddleware, async (req, res) => {
-  try {
-    const { activity, timestamp, channel, device, customerType, metadata, sessionId } = req.body || {};
-
-    if (!activity || !String(activity).trim()) {
-      return res.status(400).json({ message: 'Thiếu activity.' });
-    }
-
-    await writeActivityLog(req, {
-      activity: String(activity).trim(),
-      timestamp: timestamp ? new Date(timestamp) : new Date(),
-      channel,
-      device,
-      customerType: customerType === 'returning' ? 'returning' : 'new',
-      metadata: metadata || null,
-      sessionId,
-      statusCode: 200
-    });
-
-    return res.status(201).json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Cannot write activity log.' });
-  }
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -411,6 +413,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = createToken(user);
+    await writeActivityLog(req, ACTIVITY_LABELS.login, user._id);
     return res.json({
       token,
       user: {
@@ -422,6 +425,15 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Login failed.' });
+  }
+});
+
+app.post('/api/auth/logout', authMiddleware, async (req, res) => {
+  try {
+    await writeActivityLog(req, ACTIVITY_LABELS.logout, req.user._id);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Logout failed.' });
   }
 });
 
@@ -498,6 +510,8 @@ app.post('/api/bookings', authMiddleware, upload.single('cv'), async (req, res) 
         paidAt: new Date()
       }
     });
+
+    await writeActivityLog(req, ACTIVITY_LABELS.booking_created, req.user._id);
 
     return res.status(201).json({
       booking: {
@@ -797,114 +811,6 @@ app.get('/api/admin/bookings', authMiddleware, adminOnly, async (_req, res) => {
   }
 });
 
-app.get('/api/admin/activity-logs', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const {
-      from,
-      to,
-      activity,
-      channel,
-      customerType,
-      page = 1,
-      limit = 50
-    } = req.query;
-
-    const filter = {};
-    if (from || to) {
-      filter.timestamp = {};
-      if (from) filter.timestamp.$gte = new Date(from);
-      if (to) filter.timestamp.$lte = new Date(to);
-    }
-    if (activity) filter.activity = new RegExp(String(activity), 'i');
-    if (channel) filter.channel = new RegExp(String(channel), 'i');
-    if (customerType && ['new', 'returning'].includes(String(customerType))) {
-      filter.customerType = String(customerType);
-    }
-
-    const pageNum = Math.max(1, Number(page) || 1);
-    const limitNum = Math.min(500, Math.max(10, Number(limit) || 50));
-
-    const [total, logs] = await Promise.all([
-      ActivityLog.countDocuments(filter),
-      ActivityLog.find(filter)
-        .select('sessionId activity timestamp channel device customerType method path statusCode latencyMs')
-        .sort({ timestamp: -1 })
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum)
-        .lean()
-    ]);
-
-    return res.json({
-      total,
-      page: pageNum,
-      limit: limitNum,
-      logs: logs.map((item) => ({
-        id: item._id,
-        sessionId: item.sessionId,
-        activity: item.activity,
-        timestamp: item.timestamp,
-        channel: item.channel,
-        device: item.device,
-        customerType: item.customerType,
-        method: item.method,
-        path: item.path,
-        statusCode: item.statusCode,
-        latencyMs: item.latencyMs
-      }))
-    });
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Cannot load activity logs.' });
-  }
-});
-
-app.get('/api/admin/activity-logs/export', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const xlsx = require('xlsx');
-    const { from, to, activity, channel, customerType } = req.query;
-    const filter = {};
-    if (from || to) {
-      filter.timestamp = {};
-      if (from) filter.timestamp.$gte = new Date(from);
-      if (to) filter.timestamp.$lte = new Date(to);
-    }
-    if (activity) filter.activity = new RegExp(String(activity), 'i');
-    if (channel) filter.channel = new RegExp(String(channel), 'i');
-    if (customerType && ['new', 'returning'].includes(String(customerType))) {
-      filter.customerType = String(customerType);
-    }
-
-    const logs = await ActivityLog.find(filter)
-      .select('sessionId activity timestamp channel device customerType method path statusCode latencyMs')
-      .sort({ timestamp: -1 })
-      .limit(50000)
-      .lean();
-
-    const rows = logs.map((item) => ({
-      'Session ID': item.sessionId,
-      Activity: item.activity,
-      Timestamp: item.timestamp,
-      Channel: item.channel,
-      Device: item.device,
-      'Customer Type': item.customerType,
-      Method: item.method,
-      Path: item.path,
-      'Status Code': item.statusCode,
-      'Latency (ms)': item.latencyMs
-    }));
-
-    const workbook = xlsx.utils.book_new();
-    const worksheet = xlsx.utils.json_to_sheet(rows);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'ActivityLogs');
-    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="activity-logs-${Date.now()}.xlsx"`);
-    return res.send(buffer);
-  } catch (error) {
-    return res.status(500).json({ message: error.message || 'Cannot export activity logs.' });
-  }
-});
-
 app.patch('/api/admin/bookings/:bookingId', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -977,6 +883,128 @@ app.delete('/api/admin/bookings/:bookingId', authMiddleware, adminOnly, async (r
     return res.json({ message: 'Đã xóa lịch hẹn.' });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'Cannot delete booking.' });
+  }
+});
+
+app.get('/api/admin/activity-logs', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 30, 500);
+    const activity = String(req.query.activity || '').trim();
+    const channel = String(req.query.channel || '').trim();
+    const device = String(req.query.device || '').trim();
+    const customerType = String(req.query.customerType || '').trim();
+    const sessionId = String(req.query.sessionId || '').trim();
+    const from = parseDateBoundary(req.query.from, false);
+    const to = parseDateBoundary(req.query.to, true);
+
+    const query = {};
+    if (activity) query.activity = activity;
+    if (channel) query.channel = channel;
+    if (device) query.device = device;
+    if (customerType) query.customerType = customerType;
+    if (sessionId) query.sessionId = sessionId;
+    if (from || to) {
+      query.timestamp = {};
+      if (from) query.timestamp.$gte = from;
+      if (to) query.timestamp.$lte = to;
+    }
+
+    const [logs, total] = await Promise.all([
+      ActivityLog.find(query)
+        .populate('userId', 'fullName email role')
+        .sort({ timestamp: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      ActivityLog.countDocuments(query)
+    ]);
+
+    return res.json({
+      logs: logs.map((item) => ({
+        id: item._id,
+        sessionId: item.sessionId,
+        activity: item.activity,
+        timestamp: item.timestamp,
+        timestampIso: toIsoDateTime(item.timestamp),
+        channel: item.channel,
+        device: item.device,
+        customerType: item.customerType,
+        user: item.userId
+          ? {
+              id: item.userId._id,
+              fullName: item.userId.fullName,
+              email: item.userId.email,
+              role: item.userId.role
+            }
+          : null
+      })),
+      paging: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit))
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Cannot load activity logs.' });
+  }
+});
+
+app.get('/api/admin/activity-logs/export', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const activity = String(req.query.activity || '').trim();
+    const channel = String(req.query.channel || '').trim();
+    const device = String(req.query.device || '').trim();
+    const customerType = String(req.query.customerType || '').trim();
+    const sessionId = String(req.query.sessionId || '').trim();
+    const from = parseDateBoundary(req.query.from, false);
+    const to = parseDateBoundary(req.query.to, true);
+
+    const query = {};
+    if (activity) query.activity = activity;
+    if (channel) query.channel = channel;
+    if (device) query.device = device;
+    if (customerType) query.customerType = customerType;
+    if (sessionId) query.sessionId = sessionId;
+    if (from || to) {
+      query.timestamp = {};
+      if (from) query.timestamp.$gte = from;
+      if (to) query.timestamp.$lte = to;
+    }
+
+    const logs = await ActivityLog.find(query)
+      .populate('userId', 'fullName email role')
+      .sort({ timestamp: -1 })
+      .lean();
+
+    const rows = logs.map((item, index) => ({
+      STT: index + 1,
+      SessionID: item.sessionId,
+      Activity: item.activity,
+      TimestampISO: toIsoDateTime(item.timestamp),
+      Channel: item.channel,
+      Device: item.device,
+      CustomerType: item.customerType,
+      UserFullName: item.userId?.fullName || '',
+      UserEmail: item.userId?.email || '',
+      UserRole: item.userId?.role || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'CheckLogs');
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const filename = `checklogs-${stamp}.xlsx`;
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buffer);
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'Cannot export activity logs.' });
   }
 });
 

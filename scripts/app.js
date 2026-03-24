@@ -21,6 +21,10 @@ const FIRST_VISIT_KEY = 'hireme_first_visit_at';
 const EXPERTS_CACHE_TTL_MS = 5 * 60 * 1000;
 const HISTORY_CACHE_TTL_MS = 2 * 60 * 1000;
 const BOOKING_STATUS_OPTIONS = ['pending_payment', 'confirmed', 'in_room', 'completed', 'cancelled', 'no_show'];
+const ADMIN_PAGE_IDS = ['admin', 'admin-users', 'admin-experts', 'admin-bookings', 'admin-checklogs'];
+const LOG_ACTIVITY_OPTIONS = ['Đăng nhập', 'Đăng xuất', 'Đặt lịch tư vấn thành công'];
+const LOG_DEVICE_OPTIONS = ['desktop', 'mobile', 'tablet'];
+const LOG_CUSTOMER_TYPE_OPTIONS = ['new', 'returning'];
 
 let authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
 let isLoggedIn = false;
@@ -32,10 +36,15 @@ let selectedTime = '';
 let authUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
 let authMode = 'login';
 let adminExpertsCache = [];
-let adminLogsPage = 1;
 let adminRetryTimer = null;
 let forceRemoteApi = false;
 let preferredApiBase = USE_LOCAL_API ? LOCAL_API_BASE_URL : '';
+let adminLogPaging = {
+    page: 1,
+    limit: 30,
+    total: 0,
+    totalPages: 1
+};
 
 function buildApiBaseCandidates() {
     const unique = (items) => Array.from(new Set(items.filter(Boolean)));
@@ -66,7 +75,7 @@ function shouldRetryWithNextBase(error, status, currentBase, hasMoreBases) {
         error instanceof TypeError;
     if (isNetworkError) return true;
 
-    // When remote does not have the latest admin/log endpoints, try local backend.
+    // When remote does not have the latest admin endpoints, try local backend.
     if (currentBase === REMOTE_API_BASE_URL && [401, 404, 405].includes(Number(status || 0))) {
         return true;
     }
@@ -97,10 +106,19 @@ function scheduleAdminAutoRetry() {
     if (adminRetryTimer) return;
     adminRetryTimer = setTimeout(async () => {
         adminRetryTimer = null;
-        if (document.body?.dataset?.page !== 'admin') return;
+        if (!ADMIN_PAGE_IDS.includes(document.body?.dataset?.page || '')) return;
         if (authUser?.role !== 'admin') return;
         await loadAdminPage();
     }, 3000);
+}
+
+function isAdminPage(pageId = document.body?.dataset?.page) {
+    return ADMIN_PAGE_IDS.includes(pageId || '');
+}
+
+function normalizePageId(pageId) {
+    if (pageId === 'admin') return 'admin-users';
+    return pageId;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -129,13 +147,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function pageRoute(pageId) {
+    const normalized = normalizePageId(pageId);
     return {
         landing: 'index.html',
         booking: 'booking.html',
         experts: 'experts.html',
         history: 'history.html',
-        admin: 'admin.html'
-    }[pageId] || 'index.html';
+        admin: 'admin-users.html',
+        'admin-users': 'admin-users.html',
+        'admin-experts': 'admin-experts.html',
+        'admin-bookings': 'admin-bookings.html',
+        'admin-checklogs': 'admin-checklogs.html'
+    }[normalized] || 'index.html';
 }
 
 function inferPageIdFromRoute(route) {
@@ -145,20 +168,25 @@ function inferPageIdFromRoute(route) {
         'booking.html': 'booking',
         'experts.html': 'experts',
         'history.html': 'history',
-        'admin.html': 'admin'
+        'admin.html': 'admin',
+        'admin-users.html': 'admin-users',
+        'admin-experts.html': 'admin-experts',
+        'admin-bookings.html': 'admin-bookings',
+        'admin-checklogs.html': 'admin-checklogs'
     };
     return map[file] || 'landing';
 }
 
 function urlForPage(pageId) {
+    const normalized = normalizePageId(pageId);
     if (pageId === 'landing') return 'index.html';
-    return `index.html?page=${pageId}`;
+    return `index.html?page=${normalized}`;
 }
 
 function currentPageFromUrl() {
     const page = new URLSearchParams(window.location.search).get('page');
-    if (page && ['landing', 'booking', 'experts', 'history', 'admin'].includes(page)) {
-        return page;
+    if (page && ['landing', 'booking', 'experts', 'history', ...ADMIN_PAGE_IDS].includes(page)) {
+        return normalizePageId(page);
     }
     return 'landing';
 }
@@ -209,6 +237,7 @@ function navigate(pageId) {
 
 async function initPageState() {
     markActiveNav();
+    markActiveAdminSubnav();
     syncAdminNavVisibility();
     enforceAdminOnlyExperience();
 
@@ -224,12 +253,17 @@ async function initPageState() {
     ]);
     applyPendingExpertSelection();
 
-    if (document.body?.dataset?.page === 'admin') {
+    if (isAdminPage()) {
         await loadAdminPage();
     }
+}
 
-    trackActivity(`view_${document.body?.dataset?.page || 'landing'}`, {
-        page: document.body?.dataset?.page || 'landing'
+function markActiveAdminSubnav() {
+    const page = document.body?.dataset?.page;
+    document.querySelectorAll('[data-admin-nav]').forEach((item) => {
+        const targetPage = item.getAttribute('data-admin-nav');
+        const active = targetPage === page;
+        item.classList.toggle('active', active);
     });
 }
 
@@ -308,9 +342,10 @@ function writeCache(key, data) {
 }
 
 function getSessionId() {
-    let sessionId = localStorage.getItem(SESSION_ID_KEY);
-    if (sessionId) return sessionId;
-    sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const existing = localStorage.getItem(SESSION_ID_KEY);
+    if (existing && /^case[A-Za-z0-9]{4}$/.test(existing)) return existing;
+    const seed = Math.random().toString(36).slice(2).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const sessionId = `case${seed.slice(0, 4).padEnd(4, '0')}`;
     localStorage.setItem(SESSION_ID_KEY, sessionId);
     return sessionId;
 }
@@ -330,8 +365,8 @@ function getCustomerTypeClientHint() {
 
 function detectDeviceClient() {
     const ua = navigator.userAgent || '';
-    if (/Mobi|Android/i.test(ua)) return 'mobile';
     if (/iPad|Tablet/i.test(ua)) return 'tablet';
+    if (/Mobi|Android|iPhone/i.test(ua)) return 'mobile';
     return 'desktop';
 }
 
@@ -347,21 +382,6 @@ function detectChannelClient() {
         }
     }
     return 'direct';
-}
-
-function trackActivity(activity, metadata = {}) {
-    if (!activity) return;
-    void apiFetch('/activity-logs', {
-        method: 'POST',
-        body: JSON.stringify({
-            activity,
-            metadata,
-            channel: detectChannelClient(),
-            device: detectDeviceClient(),
-            customerType: getCustomerTypeClientHint(),
-            sessionId: getSessionId()
-        })
-    }).catch(() => {});
 }
 
 function enforceAdminOnlyExperience() {
@@ -380,7 +400,7 @@ function enforceAdminOnlyExperience() {
         logo.style.opacity = isAdmin ? '0.7' : '';
     }
 
-    if (isAdmin && page && page !== 'admin') {
+    if (isAdmin && page && !isAdminPage(page)) {
         navigate('admin');
     }
 }
@@ -453,7 +473,7 @@ async function apiFetch(path, options = {}) {
 async function hydrateAuthFromToken() {
     if (!authToken) {
         setAuthUI(false);
-        if (document.body?.dataset?.page === 'admin') {
+        if (isAdminPage()) {
             navigate('landing');
         }
         return;
@@ -479,7 +499,7 @@ async function hydrateAuthFromToken() {
             isLoggedIn = false;
             authUser = null;
             setAuthUI(false);
-            if (document.body?.dataset?.page === 'admin') {
+            if (isAdminPage()) {
                 navigate('landing');
             }
             return;
@@ -579,11 +599,6 @@ function renderExpertsGrid(experts) {
 }
 
 function selectExpert(price, name, expertId = '') {
-    trackActivity('select_expert', {
-        expertId: expertId || null,
-        expertName: name,
-        priceVnd: Number(price || 0)
-    });
     sessionStorage.setItem(PENDING_EXPERT_KEY, JSON.stringify({ price: String(price), name, expertId }));
     navigate('booking');
 }
@@ -710,17 +725,16 @@ async function handleAuth(e) {
         currentUser = authUser.fullName;
         isLoggedIn = true;
         setAuthUI(true, currentUser);
-        trackActivity(authMode === 'register' ? 'register_success' : 'login_success', { email });
         closeModal('auth-modal');
 
         const currentPage = document.body?.dataset?.page;
         if (authUser.role !== 'admin' && currentPage === 'history') {
             await loadHistoryFromApi();
         }
-        if (authUser.role === 'admin' && currentPage !== 'admin') {
+        if (authUser.role === 'admin' && !isAdminPage(currentPage)) {
             navigate('admin');
         }
-        if (document.body?.dataset?.page === 'admin') {
+        if (isAdminPage()) {
             await loadAdminPage();
         }
     } catch (error) {
@@ -730,13 +744,21 @@ async function handleAuth(e) {
 
 async function logout() {
     if (!confirm('Bạn muốn đăng xuất?')) return;
+
+    try {
+        if (authToken) {
+            await apiFetch('/auth/logout', { method: 'POST' });
+        }
+    } catch (error) {
+        console.warn('Logout activity log failed:', error.message);
+    }
+
     authToken = '';
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem(AUTH_USER_KEY);
     isLoggedIn = false;
     authUser = null;
     setAuthUI(false);
-    trackActivity('logout', {});
     navigate('landing');
 }
 
@@ -751,11 +773,6 @@ function triggerPayment() {
     const modalPrice = document.getElementById('modal-price');
     const totalPrice = document.getElementById('total-price');
     if (modalPrice && totalPrice) modalPrice.innerText = totalPrice.innerText;
-    trackActivity('payment_modal_opened', {
-        bookingDate: selectedDate,
-        startTime: selectedTime,
-        totalPriceVnd: parseVnd(totalPrice?.innerText)
-    });
     openModal('payment-modal');
 }
 
@@ -778,20 +795,9 @@ async function processPayment() {
 
         await apiFetch('/bookings', { method: 'POST', body: formData });
         localStorage.setItem('hireme_has_booking', '1');
-        trackActivity('booking_created', {
-            bookingDate: selectedDate,
-            startTime: selectedTime,
-            totalPriceVnd: totalPrice,
-            expertId: selected.id || null
-        });
         closeModal('payment-modal');
         navigate('history');
     } catch (error) {
-        trackActivity('booking_failed', {
-            bookingDate: selectedDate,
-            startTime: selectedTime,
-            reason: error.message || 'unknown_error'
-        });
         alert(error.message || 'Có lỗi khi xử lý thanh toán.');
     } finally {
         btn.innerHTML = 'Tôi đã chuyển khoản thành công';
@@ -905,12 +911,24 @@ async function loadAdminPage() {
         return;
     }
 
-    await Promise.allSettled([
-        loadAdminUsers(),
-        loadAdminExperts(),
-        loadAdminBookings(),
-        loadAdminActivityLogs(1)
-    ]);
+    markActiveAdminSubnav();
+    const pageId = document.body?.dataset?.page;
+
+    if (pageId === 'admin-users') {
+        await loadAdminUsers();
+        return;
+    }
+    if (pageId === 'admin-experts') {
+        await Promise.allSettled([loadAdminExperts(), loadAdminBookings()]);
+        return;
+    }
+    if (pageId === 'admin-bookings') {
+        await Promise.allSettled([loadAdminExperts(), loadAdminBookings()]);
+        return;
+    }
+    if (pageId === 'admin-checklogs') {
+        await loadAdminActivityLogs();
+    }
 }
 
 async function loadAdminUsers() {
@@ -1107,6 +1125,182 @@ async function loadAdminBookings() {
     }
 }
 
+function collectActivityLogFilters() {
+    const filters = {
+        page: Number(document.getElementById('admin-log-page')?.value || 1),
+        limit: Number(document.getElementById('admin-log-limit')?.value || 30),
+        activity: document.getElementById('admin-log-activity')?.value || '',
+        channel: document.getElementById('admin-log-channel')?.value?.trim() || '',
+        device: document.getElementById('admin-log-device')?.value || '',
+        customerType: document.getElementById('admin-log-customer-type')?.value || '',
+        sessionId: document.getElementById('admin-log-session-id')?.value?.trim() || '',
+        from: document.getElementById('admin-log-from')?.value || '',
+        to: document.getElementById('admin-log-to')?.value || ''
+    };
+
+    if (!LOG_ACTIVITY_OPTIONS.includes(filters.activity)) filters.activity = '';
+    if (!LOG_DEVICE_OPTIONS.includes(filters.device)) filters.device = '';
+    if (!LOG_CUSTOMER_TYPE_OPTIONS.includes(filters.customerType)) filters.customerType = '';
+
+    return filters;
+}
+
+function toQueryString(params) {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value === '' || value === null || typeof value === 'undefined') return;
+        query.set(key, String(value));
+    });
+    const raw = query.toString();
+    return raw ? `?${raw}` : '';
+}
+
+function setAdminLogPagingInfo() {
+    const info = document.getElementById('admin-log-paging-info');
+    if (!info) return;
+    info.textContent = `Trang ${adminLogPaging.page}/${adminLogPaging.totalPages} - Tong ${adminLogPaging.total} ban ghi`;
+}
+
+function syncAdminLogPageInput() {
+    const pageInput = document.getElementById('admin-log-page');
+    if (!pageInput) return;
+    pageInput.value = String(adminLogPaging.page || 1);
+}
+
+async function loadAdminActivityLogs() {
+    const tbody = document.getElementById('admin-logs-tbody');
+    if (!tbody) return;
+
+    const filters = collectActivityLogFilters();
+    const path = `/admin/activity-logs${toQueryString(filters)}`;
+
+    try {
+        const response = await apiFetch(path, { method: 'GET' });
+        const logs = response.logs || [];
+        const paging = response.paging || {};
+        adminLogPaging = {
+            page: Number(paging.page || 1),
+            limit: Number(paging.limit || filters.limit || 30),
+            total: Number(paging.total || 0),
+            totalPages: Number(paging.totalPages || 1)
+        };
+
+        syncAdminLogPageInput();
+        setAdminLogPagingInfo();
+
+        tbody.innerHTML = logs.map((log) => {
+            return `
+                <tr>
+                    <td>${escapeHtml(log.sessionId)}</td>
+                    <td>${escapeHtml(log.activity)}</td>
+                    <td>${escapeHtml(log.timestampIso || '')}</td>
+                    <td>${escapeHtml(log.channel || '')}</td>
+                    <td>${escapeHtml(log.device || '')}</td>
+                    <td>${escapeHtml(log.customerType || '')}</td>
+                    <td>${escapeHtml(log.user?.fullName || '')}</td>
+                    <td>${escapeHtml(log.user?.email || '')}</td>
+                    <td>${escapeHtml(log.user?.role || '')}</td>
+                </tr>
+            `;
+        }).join('');
+
+        if (!logs.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="admin-empty">Khong co du lieu checklog.</td></tr>';
+        }
+    } catch (error) {
+        if (shouldRetryAdminLoad(error)) scheduleAdminAutoRetry();
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#ef4444;">${escapeHtml(error.message)}</td></tr>`;
+    }
+}
+
+function applyAdminLogFilters() {
+    const pageInput = document.getElementById('admin-log-page');
+    if (pageInput) pageInput.value = '1';
+    loadAdminActivityLogs();
+}
+
+function clearAdminLogFilters() {
+    ['admin-log-activity', 'admin-log-channel', 'admin-log-device', 'admin-log-customer-type', 'admin-log-session-id', 'admin-log-from', 'admin-log-to'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const pageInput = document.getElementById('admin-log-page');
+    if (pageInput) pageInput.value = '1';
+    loadAdminActivityLogs();
+}
+
+function adminLogPrevPage() {
+    const pageInput = document.getElementById('admin-log-page');
+    if (!pageInput) return;
+    const current = Number(pageInput.value || 1);
+    pageInput.value = String(Math.max(1, current - 1));
+    loadAdminActivityLogs();
+}
+
+function adminLogNextPage() {
+    const pageInput = document.getElementById('admin-log-page');
+    if (!pageInput) return;
+    const current = Number(pageInput.value || 1);
+    const target = Math.min(Math.max(1, adminLogPaging.totalPages || 1), current + 1);
+    pageInput.value = String(target);
+    loadAdminActivityLogs();
+}
+
+async function exportAdminActivityLogsExcel() {
+    const filters = collectActivityLogFilters();
+    delete filters.page;
+    delete filters.limit;
+
+    try {
+        const headers = {};
+        if (authToken) headers.Authorization = `Bearer ${authToken}`;
+        headers['X-Session-Id'] = getSessionId();
+        headers['X-Channel'] = detectChannelClient();
+        headers['X-Device'] = detectDeviceClient();
+        headers['X-Customer-Type'] = getCustomerTypeClientHint();
+
+        const baseUrls = buildApiBaseCandidates();
+        let exported = false;
+        for (let i = 0; i < baseUrls.length; i += 1) {
+            const baseUrl = baseUrls[i];
+            const response = await fetch(`${baseUrl}/admin/activity-logs/export${toQueryString(filters)}`, {
+                method: 'GET',
+                headers
+            });
+
+            if (!response.ok) {
+                if (shouldRetryWithNextBase(new Error('export failed'), response.status, baseUrl, i < baseUrls.length - 1)) {
+                    continue;
+                }
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.message || 'Khong the export checklog.');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            const header = response.headers.get('content-disposition') || '';
+            const nameMatch = header.match(/filename="?([^";]+)"?/i);
+            anchor.href = url;
+            anchor.download = nameMatch?.[1] || 'checklogs.xlsx';
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.URL.revokeObjectURL(url);
+            exported = true;
+            preferredApiBase = baseUrl;
+            forceRemoteApi = baseUrl === REMOTE_API_BASE_URL;
+            break;
+        }
+
+        if (!exported) {
+            throw new Error('Khong the export checklog.');
+        }
+    } catch (error) {
+        alert(error.message || 'Khong the export checklog.');
+    }
+}
+
 function openBookingEditor(bookingId, status, expertId) {
     const idInput = document.getElementById('booking-edit-id');
     const statusInput = document.getElementById('booking-edit-status');
@@ -1148,136 +1342,3 @@ async function deleteBooking(bookingId) {
     }
 }
 
-async function apiFetchBlob(path) {
-    const headers = {};
-    if (authToken) {
-        headers.Authorization = `Bearer ${authToken}`;
-    }
-    headers['X-Session-Id'] = getSessionId();
-    headers['X-Channel'] = detectChannelClient();
-    headers['X-Device'] = detectDeviceClient();
-    headers['X-Customer-Type'] = getCustomerTypeClientHint();
-
-    const baseUrls = buildApiBaseCandidates();
-
-    let lastError = null;
-    for (let i = 0; i < baseUrls.length; i += 1) {
-        const baseUrl = baseUrls[i];
-        try {
-            const controller = new AbortController();
-            const timeoutMs = baseUrl === REMOTE_API_BASE_URL
-                ? REMOTE_API_REQUEST_TIMEOUT_MS
-                : LOCAL_API_REQUEST_TIMEOUT_MS;
-            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-            const response = await fetch(`${baseUrl}${path}`, {
-                method: 'GET',
-                headers,
-                signal: controller.signal
-            }).finally(() => clearTimeout(timeoutId));
-
-            if (!response.ok) {
-                const text = await response.text();
-                const err = new Error(text || 'Export failed');
-                err.status = response.status;
-                if (shouldRetryWithNextBase(err, response.status, baseUrl, i < baseUrls.length - 1)) {
-                    lastError = err;
-                    continue;
-                }
-                throw err;
-            }
-
-            preferredApiBase = baseUrl;
-            forceRemoteApi = baseUrl === REMOTE_API_BASE_URL;
-            return await response.blob();
-        } catch (error) {
-            lastError = error;
-            if (shouldRetryWithNextBase(error, error?.status, baseUrl, i < baseUrls.length - 1)) continue;
-        }
-    }
-
-    const normalizedError = toFriendlyNetworkError(lastError);
-    throw new Error(normalizedError?.message || 'Không thể export file.');
-}
-
-function buildAdminLogsQuery(page = 1) {
-    const activity = document.getElementById('log-filter-activity')?.value?.trim() || '';
-    const channel = document.getElementById('log-filter-channel')?.value?.trim() || '';
-    const customerType = document.getElementById('log-filter-customer-type')?.value || '';
-    const from = document.getElementById('log-filter-from')?.value || '';
-    const to = document.getElementById('log-filter-to')?.value || '';
-
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('limit', '50');
-    if (activity) params.set('activity', activity);
-    if (channel) params.set('channel', channel);
-    if (customerType) params.set('customerType', customerType);
-    if (from) params.set('from', from);
-    if (to) params.set('to', `${to}T23:59:59.999Z`);
-    return params;
-}
-
-async function loadAdminActivityLogs(page = 1) {
-    const tbody = document.getElementById('admin-logs-tbody');
-    const summary = document.getElementById('admin-logs-summary');
-    if (!tbody) return;
-
-    adminLogsPage = page;
-    try {
-        const params = buildAdminLogsQuery(page);
-        const response = await apiFetch(`/admin/activity-logs?${params.toString()}`, { method: 'GET' });
-        const logs = response.logs || [];
-
-        tbody.innerHTML = logs.map((log) => `
-            <tr>
-                <td>${escapeHtml(log.sessionId || '')}</td>
-                <td>${escapeHtml(log.activity || '')}</td>
-                <td>${escapeHtml(new Date(log.timestamp).toLocaleString('vi-VN'))}</td>
-                <td>${escapeHtml(log.channel || '')}</td>
-                <td>${escapeHtml(log.device || '')}</td>
-                <td>${escapeHtml(log.customerType || '')}</td>
-                <td>${escapeHtml(log.path || '')}</td>
-                <td>${escapeHtml(String(log.statusCode || ''))}</td>
-            </tr>
-        `).join('');
-
-        if (!logs.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#64748b;">Chưa có dữ liệu log.</td></tr>';
-        }
-
-        if (summary) {
-            summary.innerText = `Tổng: ${Number(response.total || 0).toLocaleString('vi-VN')} logs | Trang ${response.page || 1}`;
-        }
-    } catch (error) {
-        if (shouldRetryAdminLoad(error)) scheduleAdminAutoRetry();
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#ef4444;">${escapeHtml(error.message)}</td></tr>`;
-    }
-}
-
-async function exportAdminActivityLogs() {
-    try {
-        const params = buildAdminLogsQuery(1);
-        params.delete('page');
-        params.delete('limit');
-        const blob = await apiFetchBlob(`/admin/activity-logs/export?${params.toString()}`);
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `activity-logs-${Date.now()}.xlsx`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-    } catch (error) {
-        alert(error.message || 'Không thể export log lúc này.');
-    }
-}
-
-function prevAdminLogsPage() {
-    const next = Math.max(1, adminLogsPage - 1);
-    loadAdminActivityLogs(next);
-}
-
-function nextAdminLogsPage() {
-    loadAdminActivityLogs(adminLogsPage + 1);
-}
