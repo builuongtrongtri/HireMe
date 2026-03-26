@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
+const { pipeline } = require('stream/promises');
 const XLSX = require('xlsx');
 
 dotenv.config();
@@ -38,6 +40,8 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+const SERVER_CV_COMPRESSION_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const SERVER_CV_COMPRESSION_MIN_SAVING_BYTES = 120 * 1024;
 
 const userSchema = new mongoose.Schema(
   {
@@ -221,6 +225,61 @@ function toIsoDateTime(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
   return date.toISOString();
+}
+
+async function optimizeUploadedCvFile(file) {
+  if (!file?.path || !file?.filename) {
+    return {
+      storageKey: file?.filename || '',
+      mimeType: file?.mimetype || 'application/pdf',
+      fileSizeBytes: Number(file?.size || 0)
+    };
+  }
+
+  if (Number(file.size || 0) < SERVER_CV_COMPRESSION_THRESHOLD_BYTES) {
+    return {
+      storageKey: file.filename,
+      mimeType: file.mimetype || 'application/pdf',
+      fileSizeBytes: Number(file.size || 0)
+    };
+  }
+
+  const sourcePath = file.path;
+  const gzipPath = `${sourcePath}.gz`;
+
+  try {
+    await pipeline(
+      fs.createReadStream(sourcePath),
+      zlib.createGzip({ level: 6 }),
+      fs.createWriteStream(gzipPath)
+    );
+
+    const gzipStat = await fs.promises.stat(gzipPath);
+    const savedBytes = Number(file.size || 0) - Number(gzipStat.size || 0);
+
+    if (savedBytes < SERVER_CV_COMPRESSION_MIN_SAVING_BYTES) {
+      await fs.promises.unlink(gzipPath).catch(() => {});
+      return {
+        storageKey: file.filename,
+        mimeType: file.mimetype || 'application/pdf',
+        fileSizeBytes: Number(file.size || 0)
+      };
+    }
+
+    await fs.promises.unlink(sourcePath).catch(() => {});
+    return {
+      storageKey: path.basename(gzipPath),
+      mimeType: 'application/gzip',
+      fileSizeBytes: Number(gzipStat.size || 0)
+    };
+  } catch (_error) {
+    await fs.promises.unlink(gzipPath).catch(() => {});
+    return {
+      storageKey: file.filename,
+      mimeType: file.mimetype || 'application/pdf',
+      fileSizeBytes: Number(file.size || 0)
+    };
+  }
 }
 
 async function authMiddleware(req, res, next) {
@@ -552,7 +611,7 @@ app.get('/api/experts', async (_req, res) => {
 
 app.post('/api/bookings', authMiddleware, upload.single('cv'), async (req, res) => {
   try {
-    const { bookingDate, startTime, priceVnd, expertId } = req.body;
+    const { bookingDate, startTime, priceVnd, expertId, cvOriginalName } = req.body;
 
     if (!req.file) {
       return res.status(400).json({ message: 'Bạn cần tải CV lên.' });
@@ -561,12 +620,14 @@ app.post('/api/bookings', authMiddleware, upload.single('cv'), async (req, res) 
       return res.status(400).json({ message: 'Thiếu thông tin lịch hẹn.' });
     }
 
+    const optimizedUpload = await optimizeUploadedCvFile(req.file);
+
     const cvDoc = await CvFile.create({
       candidateId: req.user._id,
-      originalFilename: req.file.originalname,
-      storageKey: req.file.filename,
-      mimeType: req.file.mimetype || 'application/pdf',
-      fileSizeBytes: req.file.size
+      originalFilename: String(cvOriginalName || req.file.originalname || 'CV.pdf').slice(0, 255),
+      storageKey: optimizedUpload.storageKey,
+      mimeType: optimizedUpload.mimeType,
+      fileSizeBytes: optimizedUpload.fileSizeBytes
     });
 
     let expertObjectId = null;

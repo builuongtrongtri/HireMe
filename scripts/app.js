@@ -9,10 +9,11 @@ const RUNNING_ON_LOCALHOST = ['', 'localhost', '127.0.0.1'].includes(window.loca
 const USE_LOCAL_API = RUNNING_ON_LOCALHOST && localStorage.getItem('hireme_use_local_api') === '1';
 const API_BASE_URL = USE_LOCAL_API ? LOCAL_API_BASE_URL : REMOTE_API_BASE_URL;
 const API_REQUEST_TIMEOUT_MS = 12000;
-const LOCAL_API_REQUEST_TIMEOUT_MS = 1800;
+const LOCAL_API_REQUEST_TIMEOUT_MS = 5000;
 const REMOTE_API_REQUEST_TIMEOUT_MS = 30000;
 const AUTH_TOKEN_KEY = 'hireme_token';
 const AUTH_USER_KEY = 'hireme_user';
+const PREFERRED_API_BASE_KEY = 'hireme_preferred_api_base';
 const PENDING_EXPERT_KEY = 'hireme_selected_expert';
 const EXPERTS_CACHE_KEY = 'hireme_experts_cache';
 const HISTORY_CACHE_PREFIX = 'hireme_history_cache_';
@@ -61,12 +62,17 @@ const LOG_ACTIVITY_OPTIONS = Object.values(ACTIVITY_EVENTS);
 const LOG_DEVICE_OPTIONS = ['desktop', 'mobile', 'tablet'];
 const LOG_CUSTOMER_TYPE_OPTIONS = ['new', 'returning'];
 const PAGE_VIEW_DEBOUNCE_MS = 30000;
+const LOCAL_UPLOAD_REQUEST_TIMEOUT_MS = 30000;
+const REMOTE_UPLOAD_REQUEST_TIMEOUT_MS = 90000;
+const CV_COMPRESSION_THRESHOLD_BYTES = 2 * 1024 * 1024;
+const CV_COMPRESSION_MIN_SAVING_BYTES = 120 * 1024;
 
 let authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
 let isLoggedIn = false;
 let currentUser = '';
 let uploadedFileName = '';
 let uploadedFile = null;
+let uploadedFileOriginalName = '';
 let selectedDate = '';
 let selectedTime = '';
 let authUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
@@ -74,7 +80,7 @@ let authMode = 'login';
 let adminExpertsCache = [];
 let adminRetryTimer = null;
 let forceRemoteApi = false;
-let preferredApiBase = USE_LOCAL_API ? LOCAL_API_BASE_URL : '';
+let preferredApiBase = '';
 let lastPageViewTrackByActivity = {};
 let adminLogPaging = {
     page: 1,
@@ -82,6 +88,21 @@ let adminLogPaging = {
     total: 0,
     totalPages: 1
 };
+
+function isAllowedApiBase(baseUrl) {
+    if (!baseUrl) return false;
+    const allowed = [...LOCAL_API_BASE_URLS, REMOTE_API_BASE_URL, LOCAL_API_BASE_URL];
+    return allowed.includes(baseUrl);
+}
+
+function resolveInitialPreferredApiBase() {
+    const saved = String(localStorage.getItem(PREFERRED_API_BASE_KEY) || '').trim();
+    if (isAllowedApiBase(saved)) return saved;
+    if (USE_LOCAL_API) return LOCAL_API_BASE_URL;
+    return '';
+}
+
+preferredApiBase = resolveInitialPreferredApiBase();
 
 function buildApiBaseCandidates() {
     const unique = (items) => Array.from(new Set(items.filter(Boolean)));
@@ -486,6 +507,7 @@ async function apiFetch(path, options = {}) {
     headers['X-Customer-Type'] = getCustomerTypeClientHint();
 
     const requestOptions = { ...options, headers };
+    const isUploadRequest = options.body instanceof FormData;
     const baseUrls = buildApiBaseCandidates();
 
     let lastNetworkError = null;
@@ -494,9 +516,9 @@ async function apiFetch(path, options = {}) {
         const baseUrl = baseUrls[i];
         try {
             const controller = new AbortController();
-            const timeoutMs = baseUrl === REMOTE_API_BASE_URL
-                ? REMOTE_API_REQUEST_TIMEOUT_MS
-                : LOCAL_API_REQUEST_TIMEOUT_MS;
+            const timeoutMs = isUploadRequest
+                ? (baseUrl === REMOTE_API_BASE_URL ? REMOTE_UPLOAD_REQUEST_TIMEOUT_MS : LOCAL_UPLOAD_REQUEST_TIMEOUT_MS)
+                : (baseUrl === REMOTE_API_BASE_URL ? REMOTE_API_REQUEST_TIMEOUT_MS : LOCAL_API_REQUEST_TIMEOUT_MS);
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             const response = await fetch(`${baseUrl}${path}`, {
                 ...requestOptions,
@@ -520,6 +542,11 @@ async function apiFetch(path, options = {}) {
 
             preferredApiBase = baseUrl;
             forceRemoteApi = baseUrl === REMOTE_API_BASE_URL;
+            try {
+                localStorage.setItem(PREFERRED_API_BASE_KEY, baseUrl);
+            } catch (_error) {
+                // ignore storage failure
+            }
 
             return data;
         } catch (error) {
@@ -730,24 +757,100 @@ function formatDateDisplay(isoDate) {
     return `${d}/${m}/${y}`;
 }
 
-function handleFile(event) {
+function formatFileSize(bytes) {
+    const size = Number(bytes || 0);
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+async function gzipFile(file) {
+    if (typeof CompressionStream === 'undefined') return null;
+    const stream = file.stream().pipeThrough(new CompressionStream('gzip'));
+    const blob = await new Response(stream).blob();
+    return new File([blob], `${file.name}.gz`, {
+        type: 'application/gzip',
+        lastModified: Date.now()
+    });
+}
+
+async function optimizeCvFile(file) {
+    const originalFile = file;
+    if (!originalFile || originalFile.size < CV_COMPRESSION_THRESHOLD_BYTES) {
+        return {
+            file: originalFile,
+            compressed: false,
+            message: ''
+        };
+    }
+
+    try {
+        const compressedFile = await gzipFile(originalFile);
+        if (!compressedFile) {
+            return {
+                file: originalFile,
+                compressed: false,
+                message: 'Trình duyệt chưa hỗ trợ nén tự động cho file lớn.'
+            };
+        }
+
+        const savedBytes = originalFile.size - compressedFile.size;
+        if (savedBytes < CV_COMPRESSION_MIN_SAVING_BYTES) {
+            return {
+                file: originalFile,
+                compressed: false,
+                message: 'Không nén thêm được đáng kể, hệ thống giữ file gốc để đảm bảo ổn định.'
+            };
+        }
+
+        return {
+            file: compressedFile,
+            compressed: true,
+            message: `Đã nén CV từ ${formatFileSize(originalFile.size)} xuống ${formatFileSize(compressedFile.size)}.`
+        };
+    } catch (_error) {
+        return {
+            file: originalFile,
+            compressed: false,
+            message: 'Nén file thất bại, hệ thống giữ file gốc để tiếp tục thanh toán.'
+        };
+    }
+}
+
+async function handleFile(event) {
     if (!event?.target?.files?.length) return;
-    uploadedFile = event.target.files[0];
-    uploadedFileName = uploadedFile.name;
+    const selectedFile = event.target.files[0];
+    const txt = document.getElementById('upload-text');
+    const icon = document.querySelector('.upload-area i');
+
+    if (txt) {
+        txt.innerText = 'Đang xử lý và nén CV...';
+        txt.style.color = '#334155';
+    }
+    if (icon) {
+        icon.style.color = '#334155';
+        icon.className = 'fa-solid fa-spinner fa-spin';
+    }
+
+    const optimized = await optimizeCvFile(selectedFile);
+    uploadedFile = optimized.file;
+    uploadedFileOriginalName = selectedFile.name;
+    uploadedFileName = selectedFile.name;
 
     trackActivity(ACTIVITY_EVENTS.cvUploaded, {
-        filename: uploadedFile.name,
-        fileSizeBytes: uploadedFile.size,
-        mimeType: uploadedFile.type || ''
+        filename: uploadedFileOriginalName,
+        fileSizeBytes: selectedFile.size,
+        uploadFileSizeBytes: uploadedFile.size,
+        compressedBeforeUpload: optimized.compressed,
+        mimeType: selectedFile.type || ''
     });
 
-    const txt = document.getElementById('upload-text');
     if (txt) {
-        txt.innerText = `Đã chọn file: ${uploadedFileName}`;
+        const compressionNote = optimized.message ? ` | ${optimized.message}` : '';
+        txt.innerText = `Đã chọn file: ${uploadedFileName}${compressionNote}`;
         txt.style.color = 'var(--brand-green)';
     }
 
-    const icon = document.querySelector('.upload-area i');
     if (icon) {
         icon.style.color = 'var(--brand-green)';
         icon.className = 'fa-solid fa-file-circle-check';
@@ -861,9 +964,18 @@ function triggerPayment() {
     openModal('payment-modal');
 }
 
+let isProcessingPayment = false;
+
 async function processPayment() {
     const btn = document.getElementById('confirm-payment-btn');
     if (!btn) return;
+    if (isProcessingPayment) return;
+    if (!uploadedFile) {
+        alert('Vui lòng tải lại CV trước khi thanh toán.');
+        return;
+    }
+
+    isProcessingPayment = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xác thực giao dịch...';
     btn.style.opacity = '0.8';
     btn.disabled = true;
@@ -872,6 +984,7 @@ async function processPayment() {
         const selected = getSelectedExpert();
         const totalPrice = parseVnd(document.getElementById('total-price')?.innerText);
         const formData = new FormData();
+        formData.append('cvOriginalName', uploadedFileOriginalName || uploadedFile.name);
         formData.append('cv', uploadedFile);
         formData.append('bookingDate', selectedDate);
         formData.append('startTime', selectedTime);
@@ -896,6 +1009,7 @@ async function processPayment() {
         });
         alert(error.message || 'Có lỗi khi xử lý thanh toán.');
     } finally {
+        isProcessingPayment = false;
         btn.innerHTML = 'Tôi đã chuyển khoản thành công';
         btn.style.opacity = '1';
         btn.disabled = false;
