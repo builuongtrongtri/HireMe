@@ -168,3 +168,96 @@ footer { background: #0f172a; color: #cbd5e1; padding: 4rem 0 2rem; margin-top: 
     .admin-form-actions { width: 100%; }
     .admin-form-actions .btn { width: 100%; }
 }
+
+/* ================= MOBILE / RESPONSIVE ADJUSTMENTS ================= */
+img, video { max-width: 100%; height: auto; }
+
+/* Hamburger button */
+.hamburger-btn { display: none; background: transparent; border: none; width: 44px; height: 40px; align-items: center; justify-content: center; cursor: pointer; padding: 6px; margin-left: 12px; }
+.hamburger-bar { display: block; width: 22px; height: 2px; background: var(--text-dark); margin: 4px 0; border-radius: 2px; transition: transform 0.25s, opacity 0.25s; }
+
+/* Mobile nav overlay */
+.mobile-nav { display: block; position: fixed; top: 64px; left: 0; right: 0; background: white; z-index: 9999; transform: translateY(-120%); transition: transform 0.28s ease; box-shadow: 0 20px 40px rgba(2,6,23,0.08); border-bottom: 1px solid #eef2f7; }
+.mobile-nav.open { transform: translateY(0); }
+.mobile-nav .nav-links-mobile { list-style: none; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.mobile-nav .nav-links-mobile li { padding: 12px 10px; border-radius: 8px; font-weight: 700; color: var(--text-dark); background: transparent; }
+.mobile-nav .nav-links-mobile li:hover { background: #f8fafc; }
+.mobile-nav .mobile-auth { padding: 12px 16px; display: flex; gap: 8px; }
+
+@media (max-width: 768px) {
+    .container { padding: 0 16px; }
+    #main-header { padding: 0.6rem 0; }
+    .header-content { gap: 8px; align-items: center; }
+    .nav-links { display: none; }
+    #auth-buttons .btn, .btn { padding: 0.5rem 0.9rem; font-size: 0.95rem; }
+    .logo img { height: 38px; }
+
+    .hero { padding: 2.5rem 0; min-height: auto; }
+    .hero-content { grid-template-columns: 1fr; gap: 1.5rem; }
+    .hero-image { height: auto; display: flex; justify-content: center; align-items: center; }
+    .floating-card { position: relative; width: 100%; transform: none; margin: 0 0 1rem 0; box-shadow: none; }
+    .card-1, .card-2, .card-3 { position: relative; top: auto; right: auto; left: auto; bottom: auto; width: 100%; }
+
+    .hero-title { font-size: 1.6rem; letter-spacing: 0; }
+    .hero-desc { font-size: 1rem; max-width: 100%; }
+
+    .grid-3 { grid-template-columns: 1fr; }
+    .footer-grid { grid-template-columns: 1fr; gap: 1.25rem; }
+    .doc-container { width: 100%; }
+
+    .local-video-wrapper { width: 160px; right: 1rem; bottom: 80px; }
+    .controls-bar { bottom: 1rem; padding: 0.5rem 0.75rem; gap: 0.5rem; }
+    .step-number { display: none; }
+    .hamburger-btn { display: flex; }
+}
+
+/* Additional mobile refinements */
+@media (max-width: 768px) {
+    /* Remove decorative floating cards to reduce clutter */
+    .floating-card, .hero-image { display: none; }
+
+    /* Make hero CTAs stack and full width */
+    .hero .btn { width: 100%; padding: 0.9rem 1rem; font-size: 1rem; }
+    .hero > .container .hero-content { align-items: flex-start; }
+
+    /* Increase tappable areas in header */
+    #main-header { padding: 0.5rem 0; }
+    .logo img { height: 36px; }
+
+    /* Mobile nav refinements */
+    .mobile-nav { top: 56px; max-height: calc(100vh - 56px); overflow-y: auto; }
+    .mobile-nav .nav-links-mobile { padding-top: 56px; }
+    .mobile-nav .nav-links-mobile li { font-size: 1.05rem; padding: 14px 12px; }
+    .mobile-nav .mobile-auth { padding: 12px; }
+    .mobile-nav .mobile-auth .btn { width: 100%; }
+
+    /* Modals on small screens */
+    .modal { max-width: 95%; margin: 0 10px; }
+}
+
+@media (max-width: 420px) {
+    .hero .btn { font-size: 0.95rem; padding: 0.7rem 0.9rem; }
+}
+
+/* mobile nav close button */
+.mobile-nav .mobile-close { position: absolute; top: 8px; right: 12px; background: transparent; border: none; font-size: 1.25rem; padding: 8px; cursor: pointer; }
+
+@media (max-width: 420px) {
+    .hero-title { font-size: 1.4rem; }
+    .btn { font-size: 0.95rem; padding: 0.45rem 0.8rem; }
+    .container { padding: 0 12px; }
+}
+
+/* Site-wide educational disclaimer banner (desktop & mobile) */
+.site-disclaimer { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(15,23,42,0.95); color: #e6eef8; padding: 0.9rem 16px; font-size: 0.92rem; line-height: 1.3; z-index: 99999; display: flex; align-items: center; justify-content: center; text-align: center; }
+.site-disclaimer p { margin: 0; max-width: 1100px; }
+.site-disclaimer .dismiss-btn { position: absolute; right: 12px; top: 8px; background: transparent; border: none; color: #cbd5e1; font-size: 1.1rem; padding: 8px; cursor: pointer; }
+
+@media (min-width: 992px) {
+    .site-disclaimer { font-size: 0.95rem; padding: 1rem 24px; }
+}
+
+@media (max-width: 420px) {
+    .site-disclaimer { font-size: 0.85rem; padding: 0.8rem 12px; }
+    .site-disclaimer p { padding-right: 36px; }
+}

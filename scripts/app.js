@@ -310,6 +310,10 @@ async function initPageState() {
         hydrateAuthFromToken()
     ]);
 
+    // initialize mobile navigation (hamburger + cloned links)
+    try { setupMobileNav(); } catch (e) { /* ignore */ }
+    // insert persistent educational disclaimer banner
+    try { insertSiteDisclaimer(); } catch (e) { /* ignore */ }
     trackPageViewByPage(document.body?.dataset?.page || 'landing');
     applyPendingExpertSelection();
 
@@ -334,6 +338,105 @@ function markActiveNav() {
     document.querySelectorAll('.nav-links li').forEach((item) => item.classList.remove('active'));
     const nav = document.getElementById(`nav-${page}`);
     if (nav) nav.classList.add('active');
+}
+
+/* Mobile navigation setup: clones desktop nav and auth buttons into mobile panel */
+function setupMobileNav() {
+    const mobileNav = document.getElementById('mobile-nav');
+    const hamburger = document.getElementById('hamburger-btn');
+    if (!mobileNav || !hamburger) return;
+
+    // Build mobile content
+    mobileNav.innerHTML = '';
+    const desktopNav = document.querySelector('.nav-links');
+    if (desktopNav) {
+        const clone = desktopNav.cloneNode(true);
+        clone.className = 'nav-links-mobile';
+        // remove any inline margins from cloned list
+        clone.style.margin = '0';
+        Array.from(clone.querySelectorAll('li')).forEach((li) => {
+            const oldOnclick = li.getAttribute('onclick');
+            li.onclick = () => {
+                // try to infer page id from id (nav-landing -> landing)
+                if (li.id && li.id.startsWith('nav-')) {
+                    const pid = li.id.replace('nav-', '');
+                    navigate(pid);
+                } else if (oldOnclick) {
+                    try { eval(oldOnclick); } catch (_e) {}
+                }
+                closeMobileNav();
+            };
+        });
+        mobileNav.appendChild(clone);
+    }
+
+    const auth = document.getElementById('auth-buttons');
+    if (auth) {
+        const authClone = auth.cloneNode(true);
+        const wrap = document.createElement('div');
+        wrap.className = 'mobile-auth';
+        wrap.appendChild(authClone);
+        mobileNav.appendChild(wrap);
+    }
+
+    // add close button at top of mobile nav
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'mobile-close';
+    closeBtn.setAttribute('aria-label', 'Close menu');
+    closeBtn.innerText = '✕';
+    closeBtn.addEventListener('click', closeMobileNav);
+    mobileNav.appendChild(closeBtn);
+
+    function closeMobileNav() {
+        mobileNav.classList.remove('open');
+        mobileNav.setAttribute('aria-hidden', 'true');
+        hamburger.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleMobileNav(e) {
+        e.stopPropagation();
+        const isOpen = mobileNav.classList.toggle('open');
+        mobileNav.setAttribute('aria-hidden', String(!isOpen));
+        hamburger.setAttribute('aria-expanded', String(isOpen));
+    }
+
+    hamburger.removeEventListener('click', toggleMobileNav);
+    hamburger.addEventListener('click', toggleMobileNav);
+
+    // close when clicking outside
+    document.addEventListener('click', (ev) => {
+        if (!mobileNav.classList.contains('open')) return;
+        const target = ev.target;
+        if (!mobileNav.contains(target) && !hamburger.contains(target)) closeMobileNav();
+    });
+
+    // ensure closed on resize to desktop
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 768) closeMobileNav();
+    });
+}
+
+/* Insert site-wide educational disclaimer banner (only once) */
+function insertSiteDisclaimer() {
+    if (document.getElementById('site-disclaimer')) return;
+    const disclaimerText = 'Nền tảng HireMe là một dự án giả định phục vụ mục đích học tập. Chúng tôi cam kết không thu thập, lưu trữ bất kỳ dữ liệu cá nhân nào của bạn và dự án này hoàn toàn không sử dụng cho mục đích kinh doanh thương mại.';
+    const el = document.createElement('div');
+    el.id = 'site-disclaimer';
+    el.className = 'site-disclaimer';
+    const p = document.createElement('p');
+    p.innerText = disclaimerText;
+    const btn = document.createElement('button');
+    btn.className = 'dismiss-btn';
+    btn.setAttribute('aria-label', 'Đóng thông báo');
+    btn.innerText = '✕';
+    btn.addEventListener('click', () => { el.style.display = 'none'; try { localStorage.setItem('hireme_disclaimer_hidden', '1'); } catch (_e) {} });
+    el.appendChild(p);
+    el.appendChild(btn);
+    // if user previously dismissed, keep hidden
+    try {
+        if (localStorage.getItem('hireme_disclaimer_hidden') === '1') return;
+    } catch (_e) {}
+    document.body.appendChild(el);
 }
 
 function ensureAdminNavItem() {

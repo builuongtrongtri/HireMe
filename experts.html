@@ -12,6 +12,11 @@
   <header id="main-header">
     <div class="container header-content">
       <div class="logo" onclick="navigate('landing')"><img src="logo.png" alt="HireMe Logo"></div>
+      <button id="hamburger-btn" class="hamburger-btn" aria-label="Toggle navigation">
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+      </button>
       <ul class="nav-links">
         <li id="nav-landing" onclick="navigate('landing')">Trang chu</li>
         <li id="nav-booking" onclick="navigate('booking')">Dat lich</li>
@@ -24,6 +29,7 @@
       </div>
     </div>
   </header>
+  <nav id="mobile-nav" class="mobile-nav" aria-hidden="true"></nav>
 
   <main class="page-padding container">
     <div style="text-align:center;margin-bottom:2.5rem;">

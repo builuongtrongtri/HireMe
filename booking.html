@@ -9,7 +9,14 @@
   <link rel="stylesheet" href="styles/main.css">
 </head>
 <body data-page="booking">
-  <header id="main-header"><div class="container header-content"><div class="logo" onclick="navigate('landing')"><img src="logo.png" alt="HireMe Logo"></div><ul class="nav-links"><li id="nav-landing" onclick="navigate('landing')">Trang chu</li><li id="nav-booking" onclick="navigate('booking')">Dat lich</li><li id="nav-experts" onclick="navigate('experts')">Chuyen gia</li><li id="nav-history" onclick="navigate('history')">Lich su</li></ul><div style="display:flex;gap:15px;align-items:center;"><div id="auth-buttons"><button class="btn btn-outline" style="padding:0.6rem 1.2rem;" onclick="openModal('auth-modal')">Dang nhap / Dang ky</button></div><div id="user-profile" onclick="logout()"><div class="avatar-sm"><i class="fa-solid fa-user"></i></div><span id="display-username">Hi, Guest</span></div></div></div></header>
+  <header id="main-header"><div class="container header-content"><div class="logo" onclick="navigate('landing')"><img src="logo.png" alt="HireMe Logo"></div><ul class="nav-links"><li id="nav-landing" onclick="navigate('landing')">Trang chu</li><li id="nav-booking" onclick="navigate('booking')">Dat lich</li><li id="nav-experts" onclick="navigate('experts')">Chuyen gia</li><li id="nav-history" onclick="navigate('history')">Lich su</li></ul><div style="display:flex;gap:15px;align-items:center;"><div id="auth-buttons"><button class="btn btn-outline" style="padding:0.6rem 1.2rem;" onclick="openModal('auth-modal')">Dang nhap / Dang ky</button></div><div id="user-profile" onclick="logout()"><div class="avatar-sm"><i class="fa-solid fa-user"></i></div><span id="display-username">Hi, Guest</span></div></div></div>
+    <button id="hamburger-btn" class="hamburger-btn" aria-label="Toggle navigation">
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+    </button>
+    <nav id="mobile-nav" class="mobile-nav" aria-hidden="true"></nav>
+  </header>
   <main class="page-padding container">
     <div style="text-align:center;margin-bottom:3rem;"><h1 style="font-size:2.5rem;font-weight:800;margin-bottom:1rem;color:#0f172a;">Thiet lap cuoc hen Tu van</h1></div>
     <div class="grid-2">

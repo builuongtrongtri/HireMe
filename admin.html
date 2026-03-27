@@ -12,6 +12,11 @@
   <header id="main-header">
     <div class="container header-content">
       <div class="logo"><img src="logo.png" alt="HireMe Logo"></div>
+      <button id="hamburger-btn" class="hamburger-btn" aria-label="Toggle navigation">
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+      </button>
       <ul class="nav-links">
         <li id="nav-admin" class="active" onclick="navigate('admin')">Admin Console</li>
       </ul>
@@ -21,6 +26,7 @@
       </div>
     </div>
   </header>
+  <nav id="mobile-nav" class="mobile-nav" aria-hidden="true"></nav>
 
   <main class="page-padding container admin-console" id="admin-page">
     <section class="admin-hero">
